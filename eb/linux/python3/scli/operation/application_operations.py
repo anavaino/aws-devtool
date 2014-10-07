@@ -17,7 +17,6 @@
 import logging as _logging
 
 from scli import prompt  
-from scli import config_file
 from scli.constants import ParameterName
 from scli.operation.base import OperationBase
 from scli.operation.base import OperationResult
@@ -25,7 +24,6 @@ from scli.resources import CreateApplicationOpMessage
 from scli.resources import DeleteApplicationOpMessage
 from lib.elasticbeanstalk.exception import AlreadyExistException
 from lib.elasticbeanstalk.exception import OperationInProgressException
-from lib.rds import rds_utils
 
 log = _logging.getLogger('cli.op')
 
@@ -46,7 +44,7 @@ class CreateApplicationOperation(OperationBase):
     
     def execute(self, parameter_pool):
         eb_client = self._get_eb_client(parameter_pool)
-        app_name = parameter_pool.get_value(ParameterName.ApplicationName)
+        app_name = parameter_pool.get_value(ParameterName.ApplicationName, False)
 
         try:
             response = eb_client.create_application(app_name)
@@ -87,7 +85,7 @@ class DeleteApplicationOperation(OperationBase):
     
     def execute(self, parameter_pool):
         eb_client = self._get_eb_client(parameter_pool)
-        app_name = parameter_pool.get_value(ParameterName.ApplicationName)
+        app_name = parameter_pool.get_value(ParameterName.ApplicationName, False)
         prompt.action(DeleteApplicationOpMessage.Start.format(app_name))
 
         try:

@@ -131,6 +131,15 @@ class Request(object):
         else:
             name_list.append(str(name_set))
         return name_list         
+
+    def _check_boolean(self, switch):
+        if isinstance(switch, bool):
+            if switch:
+                return 'true'
+            else:
+                return 'false'
+        else:
+            return switch
     
     def __repr__(self):
         try:
@@ -172,11 +181,7 @@ class Request(object):
         self._request['SourceBundle.S3Key'] = misc.to_unicode(key)
 
     def set_auto_create_app(self, switch):
-        if isinstance(switch, bool):
-            if switch:
-                switch = 'true'
-            else:
-                switch = 'false'
+        switch = self._check_boolean(switch)
         self._request['AutoCreateApplication'] = misc.to_unicode(switch)
 
     def set_env_name(self, name):
@@ -209,30 +214,40 @@ class Request(object):
     def set_solution_stack(self, name):
         self._request['SolutionStackName'] = misc.to_unicode(name)
 
-    def set_options(self, options):
-        for i, setting in enumerate(options):
-            self._request['Options.member.' + misc.to_unicode(i + 1) + '.Namespace'] \
-                = misc.to_unicode(setting.namespace)
-            self._request['Options.member.' + misc.to_unicode(i + 1) + '.OptionName'] \
-                = misc.to_unicode(setting.option_name)
+    def set_options(self, options_to_describe):
+        index = 1
+        for namespace, options in options_to_describe.items():
+            for option_name in options:
+                self._request['Options.member.' + misc.to_unicode(index) + '.Namespace'] \
+                    = misc.to_unicode(namespace)
+                self._request['Options.member.' + misc.to_unicode(index) + '.OptionName'] \
+                    = misc.to_unicode(option_name)
+                index = index + 1
 
-    def set_option_settings(self, settings):
-        for i, setting in enumerate(settings):
-            self._request['OptionSettings.member.' + misc.to_unicode(i + 1) + '.Namespace'] \
-                = misc.to_unicode(setting.namespace)
-            self._request['OptionSettings.member.' + misc.to_unicode(i + 1) + '.OptionName'] \
-                = misc.to_unicode(setting.option_name)
-            self._request['OptionSettings.member.' + misc.to_unicode(i + 1) + '.Value'] \
-                = misc.to_unicode(setting.value)
+    def set_option_settings(self, option_settings):
+        index = 1
+        for namespace, options in option_settings.items():
+            for option_name, value in options.items():
+                self._request['OptionSettings.member.' + misc.to_unicode(index) + '.Namespace'] \
+                    = misc.to_unicode(namespace)
+                self._request['OptionSettings.member.' + misc.to_unicode(index) + '.OptionName'] \
+                    = misc.to_unicode(option_name)
+                self._request['OptionSettings.member.' + misc.to_unicode(index) + '.Value'] \
+                    = misc.to_unicode(value)
+                index = index + 1
 
-    def set_options_to_remove(self, settings):
-        for i, setting in enumerate(settings):
-            self._request['OptionsToRemove.member.' + misc.to_unicode(i + 1) + '.Namespace'] \
-                = misc.to_unicode(setting.namespace)
-            self._request['OptionsToRemove.member.' + misc.to_unicode(i + 1) + '.OptionName'] \
-                = misc.to_unicode(setting.option_name)
+    def set_options_to_remove(self, options_to_remove):
+        index = 1
+        for namespace, options in options_to_remove.items():
+            for option_name in options:
+                self._request['OptionsToRemove.member.' + misc.to_unicode(index) + '.Namespace'] \
+                    = misc.to_unicode(namespace)
+                self._request['OptionsToRemove.member.' + misc.to_unicode(index) + '.OptionName'] \
+                    = misc.to_unicode(option_name)
+                index = index + 1
 
     def set_include_deleted(self, switch):
+        switch = self._check_boolean(switch)
         self._request['IncludeDeleted'] = misc.to_unicode(switch)
 
     def set_included_deleted_backto(self, datetime):
@@ -288,6 +303,15 @@ class Request(object):
                     self._request['TemplateSpecification.TemplateSnippets.member.' \
                                   + misc.to_unicode(i + 1)+'.Order'] \
                         = misc.to_unicode(snippet.order)
+    
+    def set_tier(self, environment_tier):
+        self._request['Tier.Name'] = misc.to_unicode(environment_tier.name)
+        self._request['Tier.Type'] = misc.to_unicode(environment_tier.type)
+        self._request['Tier.Version'] = misc.to_unicode(environment_tier.version)
+    
+    def set_info_type(self, info_type):
+        self._request['InfoType'] = misc.to_unicode(info_type)
+
         
 class Response(object):
     

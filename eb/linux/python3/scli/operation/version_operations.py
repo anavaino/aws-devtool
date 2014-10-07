@@ -16,14 +16,14 @@
 
 import logging as _logging
 
-from scli import prompt
-from scli.operation.base import OperationBase
-from scli.operation.base import OperationResult
-from scli.parameter import Parameter
-from scli.constants import ParameterName
-from scli.resources import CreateApplicationVersionOpMessage
-from lib.elasticbeanstalk import eb_utils
+from lib.utility import shell_utils
 from lib.elasticbeanstalk.exception import AlreadyExistException
+from scli import prompt
+from scli.constants import ParameterSource, ServiceDefault
+from scli.operation.base import OperationBase, OperationResult
+from scli.parameter import Parameter, ParameterName
+from scli.resources import CreateApplicationVersionOpMessage, \
+    PushApplicationVersionOpMessage, RecordApplicationVersionOpMessage
 
 log = _logging.getLogger('cli.op')
 
@@ -37,7 +37,77 @@ class CreateApplicationVersionOperation(OperationBase):
                          ParameterName.Region,
                          ParameterName.SolutionStack,
                          ParameterName.ApplicationName,
-                         ParameterName.ApplicationVersionName
+                        }
+    
+    _output_parameters = set()
+
+    # Create Sample Application Version
+    def execute(self, parameter_pool):
+        eb_client = self._get_eb_client(parameter_pool)
+        app_name = parameter_pool.get_value(ParameterName.ApplicationName, False)
+        
+        try:
+            response = eb_client.create_application_version(app_name, 
+                                                            ServiceDefault.DEFAULT_VERSION_NAME)
+        except AlreadyExistException:
+            log.info('Version "{0}" of Application "{1}" already exists.'.\
+                     format(ServiceDefault.DEFAULT_VERSION_NAME, app_name))
+            msg = CreateApplicationVersionOpMessage.AlreadyExist.format(ServiceDefault.DEFAULT_VERSION_NAME)
+            prompt.info(msg)
+   
+            ret_result = OperationResult(self, None, msg, None)
+        else:        
+            log.info('Received response for CreateApplicationVersion call.')
+            self._log_api_result(self.__class__.__name__, 'CreateApplicationVersion', response.result)
+            msg = CreateApplicationVersionOpMessage.Succeed.format(ServiceDefault.DEFAULT_VERSION_NAME)      
+            prompt.info(msg)
+
+            ret_result = OperationResult(self, response.request_id, msg, response.result)
+
+        return ret_result
+
+
+class PushApplicationVersionOperation(OperationBase):
+
+    _input_parameters = {
+                         ParameterName.AwsAccessKeyId, 
+                         ParameterName.AwsSecretAccessKey,
+                         ParameterName.ServiceEndpoint, 
+                         ParameterName.Region,
+                         ParameterName.ApplicationName,
+                         ParameterName.EnvironmentName
+                        }
+    
+    _output_parameters = set()
+   
+    def execute(self, parameter_pool):
+        eb_client = self._get_eb_client(parameter_pool)
+        app_name = parameter_pool.get_value(ParameterName.ApplicationName, False)
+        env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
+
+        response = eb_client.describe_environments(app_name, env_name, include_deleted = False)
+        if len(response.result) > 0:
+            shell_utils.git_aws_push(False)
+        else:
+            prompt.error(PushApplicationVersionOpMessage.EnvNotExist.format(env_name))
+
+        ret_result = OperationResult(self,
+                                     None, 
+                                     None,
+                                     None)
+            
+        return ret_result
+
+    
+class RecordApplicationVersionOperation(OperationBase):
+
+    _input_parameters = {
+                         ParameterName.AwsAccessKeyId, 
+                         ParameterName.AwsSecretAccessKey,
+                         ParameterName.ServiceEndpoint, 
+                         ParameterName.Region,
+                         ParameterName.ApplicationName,
+                         ParameterName.EnvironmentName
                         }
     
     _output_parameters = {
@@ -47,50 +117,24 @@ class CreateApplicationVersionOperation(OperationBase):
    
     def execute(self, parameter_pool):
         eb_client = self._get_eb_client(parameter_pool)
-        app_name = parameter_pool.get_value(ParameterName.ApplicationName)
-        version_name = parameter_pool.get_value(ParameterName.ApplicationVersionName)
-        solution_stack = parameter_pool.get_value(ParameterName.SolutionStack)
+        app_name = parameter_pool.get_value(ParameterName.ApplicationName, False)
+        env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
 
-        container_name = eb_utils.match_solution_stack(solution_stack)
-        log.info('App container is "{0}".'.format(container_name))
-
-        try:
-            response = eb_client.create_application_version(app_name, 
-                                                            version_name)
-        except AlreadyExistException:
-            log.info('Version "{0}" of Application "{1}" already exists.'.\
-                     format(version_name, app_name))
-            prompt.info(CreateApplicationVersionOpMessage.AlreadyExist.format(version_name))
-   
-            ret_result = OperationResult(self,
-                                         None, 
-                                         CreateApplicationVersionOpMessage.AlreadyExist.\
-                                            format(version_name),
-                                         None)
-        else:        
-            log.info('Received response for CreateApplicationVersion call.')
-            prompt.info(CreateApplicationVersionOpMessage.Succeed.format(version_name))
-            self._log_api_result(self.__class__.__name__, 'CreateApplicationVersion', response.result)            
-
-            ret_result = OperationResult(self,
-                                         response.request_id, 
-                                         CreateApplicationVersionOpMessage.Succeed.\
-                                            format(version_name),
-                                         response.result)
-
-        if eb_utils.has_default_app(parameter_pool, solution_stack):
-            log.info('Solution stack "{0}" has default sample app.'.format(solution_stack))
-            prompt.info(CreateApplicationVersionOpMessage.HasDefaultAppSource.format(solution_stack))
-        else:
-            # Set version to None
-            source = parameter_pool.get_source(ParameterName.ApplicationVersionName) 
-            parameter_pool.put(Parameter(ParameterName.ApplicationVersionName, 
-                                         None,
-                                         source),
-                               True)
+        response = eb_client.describe_environments(app_name, env_name, include_deleted = False)
+        if len(response.result) > 0:    # If have result
+            version_name = response.result[0].version_label
+            log.info('Retrieved application version {0} for environment {1}'.format(version_name, env_name))
+            prompt.info(RecordApplicationVersionOpMessage.Succeed.format(version_name))
+            parameter_pool.put(Parameter(ParameterName.ApplicationVersionName,
+                                         version_name,
+                                         ParameterSource.OperationOutput),
+                               True)            
+            
+        ret_result = OperationResult(self,
+                                     response.request_id, 
+                                     None,
+                                     response.result)
             
         return ret_result
 
 
-    
-    

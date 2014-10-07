@@ -15,7 +15,7 @@
 #==============================================================================
 from contextlib import closing
 from datetime import datetime
-import platform
+import locale, platform
 from StringIO import StringIO
 import sys
 
@@ -39,11 +39,17 @@ def is_os_windows():
         return False
 
     
-def to_unicode(string, codec = ServiceDefault.CHAR_CODEC):
+def to_unicode(string, convert_none = True, codec = ServiceDefault.CHAR_CODEC):
     """ Do our best to convert strings to Unicode if we can."""
+    if string is None:
+        if convert_none:
+            return u''
+        else:
+            return None    
+    
     if sys.version_info > (3, 0):
         if isinstance(string, bytes):
-            return string.decode(codec)
+            return string.decode(codec, 'replace')
         elif isinstance(string, str):
             return string
         else:
@@ -52,31 +58,44 @@ def to_unicode(string, codec = ServiceDefault.CHAR_CODEC):
         if isinstance(string, unicode):
             return string
         elif isinstance(string, str):        
-            return unicode(string, codec)
+            return unicode(string, codec, 'replace')
         else:
             return unicode(string)
 
         
-def to_bytes(string, codec = ServiceDefault.CHAR_CODEC):
+def to_bytes(string, convert_none = True, codec = ServiceDefault.CHAR_CODEC):
     """ Do you best to convert string to bytes if we can.
         Note: in Python 2.7 "bytes" is alias of "str". 
     """
+    if string is None:
+        if convert_none:
+            return ''
+        else:
+            return None
+    
     if sys.version_info > (3, 0):
         if isinstance(string, str):
-            return string.encode(codec)
+            return string.encode(codec, 'replace')
         elif isinstance(string, bytes):
             return string
         else:
-            return str(string).encode(codec)
+            return str(string).encode(codec, 'replace')
     else:        
         if isinstance(string, unicode):
-            return string.encode(codec)
+            return string.encode(codec, 'replace')
         elif isinstance(string, str):
             return string
         else:
             return str(string)
 
-    
+
+def to_terminal_codepage(string, convert_none = True):
+    if sys.version_info > (3, 0):
+        return string
+    else:
+        return to_bytes(string, convert_none, locale.getpreferredencoding())
+
+
 def _is_container(collection):
     if isinstance(collection, dict) \
         or isinstance(collection, dict) \

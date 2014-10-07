@@ -47,5 +47,9 @@ EnvironmentResourcesCLI.new do |client|
   client.filter 'Instances'            do |val| client.flatten_resources(val) end
   client.filter 'LaunchConfigurations' do |val| client.flatten_resources(val) end
   client.filter 'LoadBalancers'        do |val| client.flatten_resources(val) end
-  client.filter 'Triggers'             do |val| client.flatten_resources(val) end    
+  client.filter 'Triggers'             do |val| client.flatten_resources(val) end
+  client.filter 'Queues'               do |val| val.collect { |i| i['URL'] } end
+
+  client.exclude 'Resources'
+  client.exclude 'RuntimeSources'
 end.run(ARGV)

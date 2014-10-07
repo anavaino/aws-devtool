@@ -60,7 +60,7 @@ def configureLogging(level = None, quiet = False,
     if not spec_dir:
         output_file=_getLogFile(filename)
     else:
-        config_file.create_directory(spec_dir)
+        shell_utils.create_directory(spec_dir)
         output_file = spec_dir + os.path.sep + filename
         
     ori_path = shell_utils.ori_path()
@@ -131,8 +131,7 @@ def main(cmdline = None):
         cli_parse.parse(parameter_pool, cmdline)
         log.debug('Finished parsing command line arguments.')
         # TODO: set quiet level here.
-        if (parameter_pool.has(ParameterName.Verbose) \
-                and parameter_pool.get_value(ParameterName.Verbose) == ServiceDefault.ENABLED):
+        if parameter_pool.get_value(ParameterName.Verbose) == ServiceDefault.ENABLED:
             prompt.set_level(OutputLevel.Info)
         else:
             prompt.set_level(OutputLevel.ResultOnly)
@@ -146,7 +145,7 @@ def main(cmdline = None):
         
     except BaseException as ex:
         print((misc.to_unicode(ex)))
-        log.error(ex)
+        log.exception(ex)
         _exit(1)
     
     # Execute queue
@@ -156,7 +155,7 @@ def main(cmdline = None):
         log.debug('Finished executing operation queue')
     except BaseException as ex:
         print((misc.to_unicode(ex)))
-        log.error(ex)
+        log.exception(ex)
         _exit(1)
 
     _exit(0)

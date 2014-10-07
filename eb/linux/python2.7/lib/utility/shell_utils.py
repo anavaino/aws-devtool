@@ -13,16 +13,10 @@
 # implied. See the License for the specific language governing permissions
 # and limitations under the License.
 #==============================================================================
-import locale
-import logging
-import os
-import sys
-import re
-import shlex
-import shutil
-import subprocess
+import locale, logging, os, sys, re, shlex, shutil, subprocess, webbrowser
 
-from scli.constants import FileErrorConstant, GitDefault
+from scli import prompt
+from scli.constants import DevToolsDefault, FileErrorConstant, GitDefault
 from scli.exception import EBSCliException
 from scli.resources import DevToolsMessage
 from lib.utility import misc
@@ -44,6 +38,12 @@ def ori_path():
                                 decode(locale.getpreferredencoding()))
 
 
+def create_directory(directory):
+    ''' Create a directory at location. Return if exist. '''                    
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    
+    
 def call(command, quiet = True):
     '''
     Call external process. command is a list of command line arguments including name
@@ -68,7 +68,7 @@ def call(command, quiet = True):
     if quiet:
         args['stderr'] = subprocess.STDOUT        
         
-    return subprocess.check_output(**args)
+    return misc.to_unicode(subprocess.check_output(**args), False, locale.getpreferredencoding())
 
 
 def climb_dir_tree(path, level):
@@ -96,7 +96,7 @@ def get_working_branch(quiet = False):
         if quiet:
             return None, 0
         else:
-            raise EBSCliException(DevToolsMessage.GitRepoNotExist)
+            raise EBSCliException(DevToolsMessage.GitRepoNotExist.format(ex.message))
     
     except (OSError, IOError) as ex:
         log.error(u'Failed to call git, because "{0}".'.format(ex))
@@ -106,7 +106,7 @@ def get_working_branch(quiet = False):
             # Cannot find or run script
             if ex.errno == FileErrorConstant.FileNotFoundErrorCode:
                 log.error(u'Cannot find Git executable "git".')
-            raise EBSCliException(DevToolsMessage.GitCommandError)
+            raise EBSCliException(DevToolsMessage.GitCommandError.format(ex.message))
         
 
 def copy_file(src, dst, quiet = True):
@@ -119,4 +119,61 @@ def copy_file(src, dst, quiet = True):
                   format(src, dst, ex))
         if not quiet:
             raise
+
+
+def get_repo_head_hash(quiet = False):
+    try:
+        headhash = misc.to_unicode(call(GitDefault.GetHeadHash), locale.getpreferredencoding())
+        return headhash.replace(os.linesep, u'')
+    except subprocess.CalledProcessError as ex:
+        # Git returned with an error code
+        log.error(u'Git local repository does not have HEAD info:  "{0}".'.format(ex))
+        if quiet:
+            return None
+        else:
+            raise EBSCliException(DevToolsMessage.GitHeadNotExist.format(ex.message))
     
+    except (OSError, IOError) as ex:
+        log.error(u'Failed to call git, because "{0}".'.format(ex))
+        if quiet:
+            return None
+        else:
+            # Cannot find or run script
+            if ex.errno == FileErrorConstant.FileNotFoundErrorCode:
+                log.error(u'Cannot find Git executable "git".')
+            raise EBSCliException(DevToolsMessage.GitCommandError.format(ex.message))
+
+
+def git_aws_push(push_only = False, quiet = False):
+    output = prompt.info if quiet else prompt.result
+    cmd = DevToolsDefault.AwsCreateAppVersion if push_only else DevToolsDefault.AwsPush
+    
+    try:
+        output(misc.to_unicode(call(cmd, quiet=quiet), locale.getpreferredencoding())) 
+        return True
+    except subprocess.CalledProcessError as ex:
+        # Git returned with an error code
+        log.error(u'Failed to push local HEAD to EB:  "{0}".'.format(ex))
+        if quiet:
+            return False
+        else:
+            raise EBSCliException(DevToolsMessage.PushFail.format(ex.message))
+    
+    except (OSError, IOError) as ex:
+        log.error(u'Failed to call git, because "{0}".'.format(ex))
+        if quiet:
+            return False
+        else:
+            # Cannot find or run script
+            if ex.errno == FileErrorConstant.FileNotFoundErrorCode:
+                log.error(u'Cannot find Git executable "git".')
+            raise EBSCliException(DevToolsMessage.GitCommandError.format(ex.message))
+        
+
+def open_url(url, quiet = True):
+    try:
+        webbrowser.open(url)
+    except webbrowser.Error as ex: 
+        log.error(u'Failed to open URL "{0}" in default browser, because "{1}".'.format(url, ex))
+        if not quiet:
+            raise

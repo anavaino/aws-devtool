@@ -18,13 +18,13 @@ import logging
 import subprocess
 
 from scli import api_wrapper, config_file, prompt
-from scli.constants import AwsCredentialFileDefault, DevToolsConfigFile, EbConfigFile, \
+from scli.constants import AwsCredentialFileDefault, CommandType, DevToolsConfigFile, EbConfigFile, \
                         EbLocalDir, FileErrorConstant, GitIgnoreFile, OSSpecific, \
                         ParameterName, ParameterSource, RdsDefault
 from scli.exception import EBSCliException, EBConfigFileNotExistError
 from scli.operation.base import OperationBase, OperationResult
 from scli.parameter import Parameter
-from scli.resources import CommandType, ConfigFileMessage, ConfigFileErrorMessage, \
+from scli.resources import ConfigFileMessage, ConfigFileErrorMessage, \
                         DevToolsMessage, SaveConfigurationSettingOpMessage, \
                         TerminalMessage, WriteAwsCredentialFileOpMessage
 from lib.utility import misc, shell_utils
@@ -34,7 +34,7 @@ log = logging.getLogger('cli.op')
 
 
 def create_eb_local_dir():
-    config_file.create_directory(os.getcwd() + os.path.sep + EbLocalDir.Path)    
+    shell_utils.create_directory(os.getcwd() + os.path.sep + EbLocalDir.Path)    
 
 
 # Format: ParameterName, from_file function, to_file function
@@ -85,8 +85,7 @@ class ReadAwsCredentialFileOperation(OperationBase):
                 func_matrix.append((None, name, from_file))
                 
         # Loop over branch environment settings
-        branches = parameter_pool.get_value(ParameterName.Branches)\
-            if parameter_pool.has(ParameterName.Branches) else None
+        branches = parameter_pool.get_value(ParameterName.Branches)
         if branches:
             for branch_name, branch_setting in branches.items():
                 if not name in branch_setting:
@@ -121,11 +120,10 @@ class UpdateAwsCredentialFileOperation(OperationBase):
                 func_matrix.append((None, name, to_file))
 
         # Loop over current branch settings
-        cur_branch = parameter_pool.get_value(ParameterName.CurrentBranch)\
-            if parameter_pool.has(ParameterName.CurrentBranch) else None
+        cur_branch = parameter_pool.get_value(ParameterName.CurrentBranch)
         if cur_branch and ParameterSource.is_ahead(parameter_pool.get_source(ParameterName.Branches),
                                                    ParameterSource.ConfigFile):
-            branch_setting = parameter_pool.get_value(ParameterName.Branches)[cur_branch]
+            branch_setting = parameter_pool.get_value(ParameterName.Branches, False)[cur_branch]
             for name, _, to_file in CredentialFileParameters:
                 if not name in branch_setting:
                     continue
@@ -139,7 +137,7 @@ class UpdateAwsCredentialFileOperation(OperationBase):
         location = config_file.default_aws_credential_file_location()        
         # Create directory if needed
         try:
-            config_file.create_directory(config_file.default_aws_credential_file_path())
+            shell_utils.create_directory(config_file.default_aws_credential_file_path())
             config_file.write_aws_credential_file(location, parameter_pool, func_matrix)
         except BaseException as ex:
             log.error('Encountered error when creating AWS Credential file at "{0}", because {1}.'.\
@@ -176,7 +174,7 @@ class LoadEbConfigFileOperation(OperationBase):
             #Post processing
             if not parameter_pool.has(ParameterName.RdsSnippetUrl)\
                 and parameter_pool.has(ParameterName.Region):
-                region = parameter_pool.get_value(ParameterName.Region)
+                region = parameter_pool.get_value(ParameterName.Region, False)
                 parameter_pool.put(Parameter(ParameterName.RdsSnippetUrl,
                                              RdsDefault.get_snippet_url(region),
                                              ParameterSource.ConfigFile))
@@ -237,32 +235,13 @@ class UpdateDevToolsConfigOperation(OperationBase):
         
         # Test if git local repo exists
         if not os.path.isdir(os.path.join(os.getcwd(), DevToolsConfigFile.Path)):
-            prompt.error(DevToolsMessage.GitRepoNotExist)
-#            raise EBSCliException()
+            prompt.error(DevToolsMessage.GitRepoNotExist.format(''))
             return
-        
-        try:
-            self.run_dev_tools_script()
-            
-            location = DevToolsConfigFile.Path + os.path.sep + DevToolsConfigFile.Name        
-            config_file.set_access_permission(location, True)
-            
-        except (OSError, IOError, subprocess.CalledProcessError) as ex:
-            log.error("Encountered error when updating AWS Dev Tools settings: {0}.".format(ex))
-            message = DevToolsMessage.ExecutionError.format(DevToolsConfigFile.InitHelpUrl)
-            prompt.error(message)
-#            raise EBSCliException()
-        
-        ret_result = OperationResult(self, None, None, None)
-        return ret_result
-    
 
-    def run_dev_tools_script(self):
-
-        log.info('Running Dev Tools initialization script.')
-        current_path = os.getcwd()
-        
+        error = False
+        current_path = os.getcwd()        
         try:
+            log.info('Running Dev Tools initialization script.')
             if misc.is_os_windows():
                 path = shell_utils.climb_dir_tree(shell_utils.ori_path(), OSSpecific.WindowsClimbUpDepth)
                 #TODO: replace current workaround for WindowsModuleScript
@@ -279,27 +258,40 @@ class UpdateDevToolsConfigOperation(OperationBase):
                 
                 log.info('Running script "{0}".'.format(OSSpecific.WindowsRepoScript))
                 fullpath = os.path.join(path, OSSpecific.WindowsRepoScript)
-                shell_utils.call([fullpath])
+                prompt.error(shell_utils.call([fullpath]))
             else:
                 path = shell_utils.climb_dir_tree(shell_utils.ori_path(), OSSpecific.LinuxClimbUpDepth)
                 log.info('Running script "{0}" at {1}.'.format(OSSpecific.LinuxRepoScript,
                                                                 path))
                 fullpath = os.path.join(path, OSSpecific.LinuxRepoScript)
-                shell_utils.call([fullpath])
-                
+                prompt.error(shell_utils.call([fullpath]))
+            
+            location = DevToolsConfigFile.Path + os.path.sep + DevToolsConfigFile.Name        
+            config_file.set_access_permission(location, True)
+
         except subprocess.CalledProcessError as ex:
             # Git returned with an error code
-            log.error('Dev Tools initialiation script report an error, because "{0}".'.format(ex))
-            prompt.error(DevToolsMessage.InitError)
-            raise
+            log.error('Dev Tools initialization script report an error, because "{0}".'.format(ex))
+            error = True
+            prompt.error(DevToolsMessage.InitError.format(ex.message))
         
         except (OSError, IOError) as ex:
-            log.error('Failed to call Dev Tools initialiation script, because "{0}".'.format(ex))
+            log.error('Failed to call Dev Tools initialization script, because "{0}".'.format(ex))
             # Cannot find or run script
+            error = True
             if ex.errno == FileErrorConstant.FileNotFoundErrorCode:
-                prompt.error(DevToolsMessage.FileMissingError.format(fullpath))
-            raise
+                if fullpath:
+                    prompt.error(DevToolsMessage.FileMissingError.format(fullpath))
+                else:
+                    prompt.error(ex)
+
+        finally:
+            if error:            
+                prompt.error(DevToolsMessage.ExecutionError.format(DevToolsConfigFile.InitHelpUrl))
         
+        ret_result = OperationResult(self, None, None, None)
+        return ret_result
+
 
 
 class CheckGitIgnoreFileOperation(OperationBase):
@@ -314,7 +306,6 @@ class CheckGitIgnoreFileOperation(OperationBase):
         
         ret_result = OperationResult(self, None, None, None)
         return ret_result        
-
 
 
 
@@ -409,8 +400,7 @@ class TryGetCurrentBranchOperation(OperationBase):
                                      ParameterSource.ConfigFile))
         if current_branch:
             log.info('Current working branch is "{0}".'.format(current_branch))
-            branches = parameter_pool.get_value(ParameterName.Branches)\
-                if parameter_pool.has(ParameterName.Branches) else None
+            branches = parameter_pool.get_value(ParameterName.Branches)
             if branches and current_branch in list(branches.keys()):
                 log.info('Found registered environment for branch "{0}".'.format(current_branch))
                 for key, value in branches[current_branch].items():

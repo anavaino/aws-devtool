@@ -39,7 +39,7 @@ log = _logging.getLogger('aws')
 
 class RdsClient(object):
     '''
-    Web service client for Elastic Beanstalk
+    Web service client for RDS
     '''
     _signature_version = AWSSignature.SigV2
     _api_version = '2012-04-23'
@@ -66,10 +66,10 @@ class RdsClient(object):
         try:
             log.debug(request)
             return_msg = self._client.call(request, self._format)
-            log.debug('Request ID: {0}'.format(list(return_msg.json.values())[0]\
+            log.debug('Request ID: {0}'.format(list(return_msg.json().values())[0]\
                                                 ['ResponseMetadata']['RequestId'])) 
                       
-            return return_msg.json
+            return return_msg.json()
             
         except AwsServiceException as ex:
             log.debug(misc.to_unicode(ex))

@@ -39,6 +39,16 @@ AWS::ElasticBeanstalk::OptionSettingsCLI.new do |client|
     client.service_param('TemplateName', template_name)
   end
 
+  client.option('-T', '--tier NAME', 'Environment tier with attributes separated by ::. E.g. WebServer::Standard::1.0') do |tier|
+    name, type, version = tier.split '::'
+    tier = {
+      'Name'    => name,
+      'Type'    => type,
+      'Version' => version
+    }
+    client.service_param('Tier', tier)
+  end
+
   client.option('-s', '--solution-stack STACK', 'Solution stack name') do |solution_stack|
     client.service_param('SolutionStackName', solution_stack)
   end

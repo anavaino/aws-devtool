@@ -19,15 +19,11 @@ import logging
 from lib.utility import misc
 from lib.elasticbeanstalk import eb_utils
 from lib.rds import rds_utils
-from scli.constants import AvailableServiceRegion
-from scli.constants import ParameterSource
-from scli.constants import ParameterName
-from scli.constants import ServiceEndpoint
-from scli.constants import ServiceRegionName
+from scli.constants import AvailableServiceRegion, ParameterSource, ParameterName, \
+    ServiceEndpoint, ServiceRegionName
 from scli.terminal.base import TerminalBase
-from scli.resources import TerminalMessage
-from scli.resources import TerminalPromptAskingMessage
-from scli.resources import TerminalPromptSettingParameterMessage
+from scli.resources import TerminalMessage, TerminalPromptAskingMessage, \
+    TerminalPromptSettingParameterMessage
 from scli.parameter import Parameter
 
 log = logging.getLogger('cli')
@@ -38,8 +34,7 @@ class ServiceTerminal(TerminalBase):
     @classmethod
     def ask_aws_access_key_id(cls, parameter_pool):
         print(TerminalMessage.AWSKeyLocateHelp)
-        msg_value = parameter_pool.get_value(ParameterName.AwsAccessKeyId) \
-            if parameter_pool.has(ParameterName.AwsAccessKeyId) else None
+        msg_value = parameter_pool.get_value(ParameterName.AwsAccessKeyId)
         cls.ask_parameter(parameter_pool, 
                            ParameterName.AwsAccessKeyId,
                            misc.mask_string(msg_value))
@@ -47,8 +42,7 @@ class ServiceTerminal(TerminalBase):
 
     @classmethod
     def ask_aws_secret_access_key(cls, parameter_pool):
-        msg_value = parameter_pool.get_value(ParameterName.AwsSecretAccessKey) \
-            if parameter_pool.has(ParameterName.AwsSecretAccessKey) else None
+        msg_value = parameter_pool.get_value(ParameterName.AwsSecretAccessKey)
         cls.ask_parameter(parameter_pool, 
                            ParameterName.AwsSecretAccessKey,
                            misc.mask_string(msg_value))
@@ -56,8 +50,7 @@ class ServiceTerminal(TerminalBase):
 
     @classmethod
     def ask_region(cls, parameter_pool):
-        original_value = parameter_pool.get_value(ParameterName.Region) \
-            if parameter_pool.has(ParameterName.Region) else None
+        original_value = parameter_pool.get_value(ParameterName.Region)
         
         original_source = parameter_pool.get_source(ParameterName.Region) \
             if parameter_pool.has(ParameterName.Region) else None
@@ -75,10 +68,9 @@ class ServiceTerminal(TerminalBase):
             region_name_list = list()
             for region in AvailableServiceRegion:
                 region_name_list.append(ServiceRegionName[region])
-            region_index = cls.single_choice(region_name_list, 
-                                              TerminalMessage.AvailableRegion, 
-                                              None,
-                                              original_value is not None)
+            region_index = cls.single_choice(choice_list = region_name_list, 
+                                             title = TerminalMessage.AvailableRegion, 
+                                             can_return_none = original_value is not None)
             
             region_value = AvailableServiceRegion[region_index] \
                 if region_index is not None else original_value
@@ -110,7 +102,7 @@ class ServiceTerminal(TerminalBase):
             return
 
         endpoint = Parameter(ParameterName.ServiceEndpoint, 
-                             ServiceEndpoint[parameter_pool.get_value(ParameterName.Region)], 
+                             ServiceEndpoint[parameter_pool.get_value(ParameterName.Region, False)], 
                              region_source)
         parameter_pool.put(endpoint, False)
             

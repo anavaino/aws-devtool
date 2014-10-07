@@ -18,33 +18,19 @@ import logging as _logging
 import re as _re 
 
 from lib.utility import misc
-from lib.aws.exception import AwsErrorCode
-from lib.aws.exception import AwsServiceException
-from lib.aws.exception import MissingParameterException
-from lib.aws.exception import InsufficientPrivilegesException
-from lib.aws.exception import InvalidParameterValueException
-from lib.aws.exception import OptInRequiredException
-from lib.aws.webservice import AWSQueryClient
-from lib.aws.webservice import AWSSignature
-from lib.elasticbeanstalk.request import Request
-from lib.elasticbeanstalk.request import Response
+from lib.aws.exception import AwsErrorCode, AwsServiceException, MissingParameterException, \
+    InsufficientPrivilegesException, InvalidParameterValueException, OptInRequiredException
+from lib.aws.webservice import AWSQueryClient, AWSSignature
+from lib.elasticbeanstalk.request import Request, Response
 from lib.elasticbeanstalk import strings as Strings 
-from lib.elasticbeanstalk.model import ApplicationDescription
-from lib.elasticbeanstalk.model import ApplicationVersionDescription
-from lib.elasticbeanstalk.model import ConfigurationSettingsDescription
-from lib.elasticbeanstalk.model import ConfigurationOptionDescription
-from lib.elasticbeanstalk.model import EnvironmentDescription
-from lib.elasticbeanstalk.model import EnvironmentResourceDescription
-from lib.elasticbeanstalk.model import EventDescription
-from lib.elasticbeanstalk.model import SolutionStackDescription
-from lib.elasticbeanstalk.model import ValidationMessage
-from lib.elasticbeanstalk.exception import EBErrorCode
-from lib.elasticbeanstalk.exception import AlreadyExistException
-from lib.elasticbeanstalk.exception import ApplicationHasRunningEnvException
-from lib.elasticbeanstalk.exception import OperationInProgressException
-from lib.elasticbeanstalk.exception import SourceBundleDeletionException
-from lib.elasticbeanstalk.exception import S3LocationNotInServiceRegionException
-
+from lib.elasticbeanstalk.model import ApplicationDescription, ApplicationVersionDescription,\
+    ConfigurationSettingsDescription, ConfigurationOptionDescription, EnvironmentDescription,\
+    EnvironmentInfoDescription, EnvironmentResourceDescription, EventDescription, \
+    SolutionStackDescription, ValidationMessage
+from lib.elasticbeanstalk.exception import EBErrorCode, AlreadyExistException, \
+    ApplicationHasRunningEnvException, OperationInProgressException, \
+    SourceBundleDeletionException, S3LocationNotInServiceRegionException
+from scli.constants import EbDefault
 
 
 log = _logging.getLogger('eb')
@@ -78,11 +64,11 @@ class ElasticBeanstalkClient(object):
         try:
             log.debug(request)
             return_msg = self._client.call(request, self._format)
-            log.debug('Request ID: {0}'.format(list(return_msg.json.values())[0]\
+            log.debug('Request ID: {0}'.format(list(return_msg.json().values())[0]\
                                                 ['ResponseMetadata']['RequestId'])) 
 
             #TODO: set more specific charset code  
-            return return_msg.json
+            return return_msg.json()
 
         except AwsServiceException as ex:
             log.debug(misc.to_unicode(ex))
@@ -215,7 +201,7 @@ class ElasticBeanstalkClient(object):
                            template = None, solution_stack = None, version_label = None,
                            option_settings = None, option_remove = None, 
                            template_specification = None,
-                           description = None):
+                           description = None, tier = None):
         request = Request()
         request.set_operation('CreateEnvironment')
         request.set_app_name(application)
@@ -237,9 +223,9 @@ class ElasticBeanstalkClient(object):
             request.set_template_specification(template_specification)
         if description is not None: 
             request.set_description(description)
-            
-            
-            
+        if tier is not None:
+            request.set_tier(tier)
+        
         try:    
             response = self.call(request)
         except AwsServiceException as ex:
@@ -259,7 +245,7 @@ class ElasticBeanstalkClient(object):
                            template = None, version_label = None,
                            option_settings = None, option_remove = None,
                            template_specification = None,
-                           description = None):
+                           description = None, tier = None):
         request = Request()
         request.set_operation('UpdateEnvironment')
         if env_name is not None:
@@ -278,7 +264,9 @@ class ElasticBeanstalkClient(object):
             request.set_template_specification(template_specification)            
         if description is not None: 
             request.set_description(description)
-            
+        if tier is not None:
+            request.set_tier(tier)
+        
         try:    
             response = self.call(request)
         except AwsServiceException as ex:
@@ -342,20 +330,28 @@ class ElasticBeanstalkClient(object):
                                        environment_name = None, 
                                        template = None,
                                        solution_stack = None,
-                                       options = None,
-                                       ):
+                                       version_label = None,
+                                       options = None, 
+                                       option_remove = None,
+                                       template_specification = None):
         request = Request()
         request.set_operation('DescribeConfigurationOptions')
         if application_name is not None:
             request.set_app_name(application_name)
+        if solution_stack is not None:
+            request.set_solution_stack(solution_stack)
         if environment_name is not None:
             request.set_env_name(environment_name)
         if template is not None:
             request.set_template(template)
-        if solution_stack is not None:
-            request.set_solution_stack(solution_stack)
-        if options is not None and len(options) > 0:
+        if version_label is not None:
+            request.set_version_label(version_label)
+        if options is not None:
             request.set_options(options)
+        if option_remove is not None: 
+            request.set_options_to_remove(option_remove)
+        if template_specification is not None: 
+            request.set_template_specification(template_specification)     
         
         try:    
             response = self.call(request)
@@ -367,9 +363,9 @@ class ElasticBeanstalkClient(object):
         request_id = response['DescribeConfigurationOptionsResponse']\
             ['ResponseMetadata']['RequestId']
 
-        option_descriptions = set()
+        option_descriptions = list()
         for option in options:
-            option_descriptions.add(ConfigurationOptionDescription.from_json(option))
+            option_descriptions.append(ConfigurationOptionDescription.from_json(option))
         return Response(request_id, option_descriptions)
 
 
@@ -459,6 +455,57 @@ class ElasticBeanstalkClient(object):
         resources = EnvironmentResourceDescription.from_json(result)
         return Response(request_id, resources)
     
+
+    def request_environment_info (self, environment_name = None, 
+                                  environment_id = None, info_type = EbDefault.TailLog):
+        request = Request()
+        request.set_operation('RequestEnvironmentInfo')
+        if environment_name is not None:        
+            request.set_env_name(environment_name)
+        if environment_id is not None:        
+            request.set_env_id(environment_id)
+        if info_type is not None:        
+            request.set_info_type(info_type)
+        
+        try:    
+            response = self.call(request)
+        except:
+            raise
+
+        # parse message
+        request_id = response['RequestEnvironmentInfoResponse']\
+            ['ResponseMetadata']['RequestId']
+            
+        return Response(request_id)
+    
+        
+    def retrieve_environment_info (self, environment_name = None, 
+                                  environment_id = None, info_type = EbDefault.TailLog):
+        request = Request()
+        request.set_operation('RetrieveEnvironmentInfo')
+        if environment_name is not None:        
+            request.set_env_name(environment_name)
+        if environment_id is not None:        
+            request.set_env_id(environment_id)
+        if info_type is not None:        
+            request.set_info_type(info_type)
+                    
+        try:    
+            response = self.call(request)
+        except:
+            raise
+
+        # parse message
+        results = response['RetrieveEnvironmentInfoResponse']\
+            ['RetrieveEnvironmentInfoResult']['EnvironmentInfo']
+        request_id = response['RetrieveEnvironmentInfoResponse']\
+            ['ResponseMetadata']['RequestId']
+                
+        env_infos = []
+        for result in results:
+            env_infos.append(EnvironmentInfoDescription.from_json(result))
+        return Response(request_id, env_infos)                
+
     
     def describe_events (self, application = None, 
                          environment_name = None, environment_id = None,

@@ -20,6 +20,7 @@ from scli.constants import ParameterName as Name
 from scli.terminal.base import TerminalBase
 from scli.terminal.beanstalk_terminal import BeanstalkTerminal
 from scli.terminal.service_terminal import ServiceTerminal
+from scli.terminal.iam_terminal import IamTerminal
 from scli.terminal.rds_terminal import RdsTerminal
 
 
@@ -39,6 +40,7 @@ class Terminal(object):
 
         self._handlers[Name.ApplicationName] = BeanstalkTerminal.ask_application_name
         self._handlers[Name.EnvironmentName] = BeanstalkTerminal.ask_environment_name
+        self._handlers[Name.EnvironmentTier] = BeanstalkTerminal.ask_environment_tier
         self._handlers[Name.SolutionStack] = BeanstalkTerminal.ask_solution_stack
         self._handlers[Name.BranchMapping] = BeanstalkTerminal.ask_branch
         
@@ -47,8 +49,10 @@ class Terminal(object):
         self._handlers[Name.RdsSourceSnapshotName] = RdsTerminal.ask_snapshot_name
         self._handlers[Name.RdsDeletionPolicy] = RdsTerminal.ask_delete_to_snapshot
 
+        self._handlers[Name.InstanceProfileName] = IamTerminal.ask_profile_creation
+        self._handlers[Name.EnvironmentType] = BeanstalkTerminal.ask_environment_type 
 
-    
+
     def ask_parameters(self, parameter_pool, parameter_names, skip_exist):
         ''' 
         Ask customer input of specified parameters via terminal interface.

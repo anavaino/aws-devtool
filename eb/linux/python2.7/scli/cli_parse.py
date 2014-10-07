@@ -14,21 +14,16 @@
 # and limitations under the License.
 #==============================================================================
 
-
 import argparse
 from contextlib import closing
 import logging
 from StringIO import StringIO
 
-from lib.utility import misc 
-from scli.resources import CommandType
-from scli.resources import CLISwitch
-from scli.resources import CLISwitchMsg
-from scli.resources import EBSCliAttr
-from scli.constants import ServiceDefault
-from scli.constants import ServiceRegionId
-from scli.constants import ParameterName
-from scli.constants import ParameterSource
+from lib.utility import misc
+from lib.elasticbeanstalk.model import EnvironmentTier 
+from scli.resources import CLISwitch, CLISwitchMsg, EBSCliAttr 
+from scli.constants import CommandType, ServiceDefault, ServiceRegionId, \
+    ParameterName, ParameterSource
 from scli.parameter import Parameter
 from scli.exception import ArgumentError
 
@@ -37,17 +32,21 @@ log = logging.getLogger('cli')
 
 
 def _word_join(word_list, separator = u''):
-    x =  separator.join(map(unicode, word_list))
+    x =  separator.join(map(misc.to_unicode, word_list))
     return x
 
 
 def command(string):
-    command = unicode(string) 
+    command = misc.to_unicode(string)
     for item in CommandType:
         if item.lower() == command.lower().strip():
             return item
-    raise AttributeError(unicode.format(EBSCliAttr.InvalidCommand, command))
+    raise AttributeError(EBSCliAttr.InvalidCommand.format(command))
 
+
+def subcommand(string):
+    subcommand = misc.to_unicode(string)
+    return subcommand
 
 def _init_parser(parser):
     
@@ -55,6 +54,11 @@ def _init_parser(parser):
     parser.add_argument(CLISwitch[ParameterName.Command], 
                         type = command,
                         metavar = u'COMMAND', help = commands)
+
+    parser.add_argument(CLISwitch[ParameterName.SubCommand], 
+                        type = subcommand, nargs = '*',
+                        default = None,
+                        metavar = u'SUBCOMMAND',)
     
     # AWS credential
     parser.add_argument(u'-I', u'--' + CLISwitch[ParameterName.AwsAccessKeyId], 
@@ -72,12 +76,16 @@ def _init_parser(parser):
                         metavar = u'FILE_PATH_NAME',
                         help = CLISwitchMsg[ParameterName.AwsCredentialFile]) 
     
+    # Application/environment
+    parser.add_argument(u'-t', u'--' + CLISwitch[ParameterName.EnvironmentTier],
+                        dest = ParameterName.EnvironmentTier,
+                        metavar = u'ENVIRONMENT_TIER',
+                        help = CLISwitchMsg[ParameterName.EnvironmentTier])
     
-    # Application/environment 
-    parser.add_argument(u'-s', u'--' + CLISwitch[ParameterName.SolutionStack], 
+    parser.add_argument(u'-s', u'--' + CLISwitch[ParameterName.SolutionStack],
                         dest = ParameterName.SolutionStack, nargs = '+',
                         metavar = u'',
-                        help = CLISwitchMsg[ParameterName.SolutionStack]) 
+                        help = CLISwitchMsg[ParameterName.SolutionStack])
     
     parser.add_argument(u'-a', u'--' + CLISwitch[ParameterName.ApplicationName], 
                         dest = ParameterName.ApplicationName,
@@ -93,7 +101,6 @@ def _init_parser(parser):
                         dest = ParameterName.EnvironmentName,
                         metavar = u'ENVIRONMENT_NAME',
                         help = CLISwitchMsg[ParameterName.EnvironmentName]) 
-    
     
     # Output
     parser.add_argument(u'--' + CLISwitch[ParameterName.Verbose],
@@ -125,12 +132,12 @@ def _init_parser(parser):
                         dest = ParameterName.ServiceEndpoint, 
                         metavar = u'ENDPOINT',
                         help = CLISwitchMsg[ParameterName.ServiceEndpoint])
-
     
     # SCli Helper switch
     parser.add_argument(u'--version', action=u'version', version=EBSCliAttr.Version)    
 
-
+# List of non string parameters
+NON_STRING_PARAMETERS = [ParameterName.EnvironmentTier]
 
 def parse(parameter_pool, line = None):
     ''' Parse command arguments'''
@@ -144,6 +151,10 @@ def parse(parameter_pool, line = None):
         args = vars(parser.parse_args())
    
     # Post prcessing
+    if args[ParameterName.EnvironmentTier] is not None:
+        tier_serialized = args[ParameterName.EnvironmentTier]
+        args[ParameterName.EnvironmentTier] = EnvironmentTier.from_serialized_string(tier_serialized)
+    
     if args[ParameterName.SolutionStack] is not None:
         solution_stack = _word_join(args[ParameterName.SolutionStack], u' ')
         args[ParameterName.SolutionStack] = solution_stack
@@ -156,17 +167,27 @@ def parse(parameter_pool, line = None):
 
     # Store command line arguments into parameter pool     
     for arg, value in args.iteritems():
-        if value is not None:
-            arg = misc.to_unicode(arg)
-            value = misc.to_unicode(value)
-            if arg == CLISwitch[ParameterName.Command]:
-                parameter_pool.put(Parameter(ParameterName.Command, 
-                                             value, 
-                                             ParameterSource.CliArgument))
+        arg = misc.to_unicode(arg, convert_none=False)
+        
+        # Try to convert string/list-of-string parameters to unicode
+        if arg not in NON_STRING_PARAMETERS:
+            if isinstance(value, list):
+                value = [misc.to_unicode(item) for item in value]
             else:
-                parameter_pool.put(Parameter(arg, 
-                                             value, 
-                                             ParameterSource.CliArgument))
+                value = misc.to_unicode(value, convert_none=False)
+        
+        if arg == CLISwitch[ParameterName.Command]:
+            parameter_pool.put(Parameter(ParameterName.Command, 
+                                         value, 
+                                         ParameterSource.CliArgument))
+        elif arg == CLISwitch[ParameterName.SubCommand]:
+            parameter_pool.put(Parameter(ParameterName.SubCommand, 
+                                         value, 
+                                         ParameterSource.CliArgument))
+        elif value is not None:
+            parameter_pool.put(Parameter(arg, 
+                                         value, 
+                                         ParameterSource.CliArgument))
     
     log.info(u'Finished parsing command line arguments')
     if log.isEnabledFor(logging.DEBUG): 

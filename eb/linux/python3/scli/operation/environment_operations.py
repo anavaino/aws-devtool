@@ -14,34 +14,30 @@
 # and limitations under the License.
 #==============================================================================
 
-import logging as _logging
+import os, logging as _logging
 
+from lib.aws import requests
 from scli import prompt
-from scli import config_file 
-from scli.constants import ParameterName
-from scli.constants import ParameterSource
-from scli.constants import EnvironmentHealth
-from scli.constants import EnvironmentStatus
-from scli.constants import ServiceDefault
-from scli.constants import ServiceRegionId
-from scli.constants import ValidationSeverity
+from scli import config_file
+from scli import api_wrapper
+from scli.constants import EbDefault, ParameterName, ParameterSource, \
+    EnvironmentHealth, EnvironmentStatus, ServiceDefault, SubCommandType, ValidationSeverity
 from scli.exception import EBSCliException
-from scli.operation.base import OperationBase
-from scli.operation.base import OperationResult
+from scli.operation.base import OperationBase, OperationResult
 from scli.parameter import Parameter
-from scli.resources import CreateEnvironmentOpMessage
-from scli.resources import DescribeEnvironmentOpMessage
-from scli.resources import TerminateEnvironmentOpMessage
-from scli.resources import UpdateEnvironmentOptionSettingOpMessage
-from scli.resources import ValidationMessage
-from scli.resources import WaitForCreateEnvironmentFinishOpMessage
-from scli.resources import WaitForTerminateEnvironmentFinishOpMessage
-from scli.resources import WaitForUpdateEnvOptionSettingFinishOpMessage
+from scli.resources import CreateEnvironmentOpMessage, DescribeEnvironmentOpMessage,\
+    GetEnvironmentEventsOpMessage,\
+    TerminateEnvironmentOpMessage, UpdateEnvironmentOptionSettingOpMessage,\
+    ValidationMessage, WaitForCreateEnvironmentFinishOpMessage, \
+    WaitForTerminateEnvironmentFinishOpMessage, WaitForUpdateEnvOptionSettingFinishOpMessage,\
+    EnvRetrieveInfoOpMessage
 from scli.terminal.base import TerminalBase
+from lib.elasticbeanstalk import eb_utils
 from lib.elasticbeanstalk.exception import AlreadyExistException
+from lib.aws.exception import InvalidParameterValueException
 from lib.elasticbeanstalk.request import TemplateSpecification
 from lib.rds import rds_utils
-from lib.utility import misc
+from lib.utility import misc, shell_utils
 
 log = _logging.getLogger('cli.op')
 
@@ -62,29 +58,48 @@ class DescribeEnvironmentOperation(OperationBase):
     
     def execute(self, parameter_pool):
         eb_client = self._get_eb_client(parameter_pool)
-        app_name = parameter_pool.get_value(ParameterName.ApplicationName)
-        env_name = parameter_pool.get_value(ParameterName.EnvironmentName)
+        app_name = parameter_pool.get_value(ParameterName.ApplicationName, False)
+        env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
         prompt.action(DescribeEnvironmentOpMessage.Start.format(env_name))
 
         response = eb_client.describe_environments(app_name, 
                                                    env_name, 
                                                    include_deleted = 'false')
         log.info('Received response for DescribeEnvironemnts call.')
-        self._log_api_result(self.__class__.__name__, 'DescribeEnvironments', response.result)            
+        self._log_api_result(self.__class__.__name__, 'DescribeEnvironments', response.result)
 
-        if len(response.result) > 0:    # If have result 
+        # Also look up environment resources for future use
+        resources = None
+        try:
+            resources = api_wrapper.retrieve_environment_resources(parameter_pool, env_name)
+        except InvalidParameterValueException:
+            pass
+        
+        env_present = (len(response.result) > 0) and bool(resources)
+        
+        if env_present:    # If have result 
             env_info = response.result[0]
+            
             message = DescribeEnvironmentOpMessage.Result.format(env_info.cname, 
                                                                  env_info.status, 
-                                                                 env_info.health)          
+                                                                 env_info.health)
             prompt.result(message)
+            
+            # Display sqs queue info before environment detail
+            if resources.queues:
+                for queue in resources.queues:
+                    message = DescribeEnvironmentOpMessage.QueueInfo.format(queue.name, queue.url)
+                    prompt.result(message)
+            
+            tier_serialized = env_info.tier.to_serialized_string() if env_info.tier else ''
             prompt.info(DescribeEnvironmentOpMessage.Detail.format(env_info.environment_name, 
-                                                                   env_info.environment_id, 
-                                                                   env_info.solution_stack_name, 
+                                                                   env_info.environment_id,
+                                                                   tier_serialized, 
+                                                                   env_info.solution_stack_name,
                                                                    env_info.version_label, 
                                                                    env_info.date_created, 
                                                                    env_info.date_updated, 
-                                                                   env_info.description))
+                                                                   env_info.description if env_info.description else ''))
 
             # If not Green, pull the most recent warning and error events
             if env_info.health in [EnvironmentHealth.Red, EnvironmentHealth.Yellow] \
@@ -103,11 +118,11 @@ class DescribeEnvironmentOperation(OperationBase):
                         log.info('Found last error event: {0}'.format(msg))
                         prompt.plain(msg)                
                         
-                        
+            
             # Display RDS instance host info
             try:
                 logical_id, rds_property = rds_utils.retrieve_rds_instance_property\
-                                                        (parameter_pool, env_name)
+                                                        (parameter_pool, resources)
                 if rds_property is not None:
                     prompt.result(DescribeEnvironmentOpMessage.RdsInfo.format\
                                   (logical_id, 
@@ -125,6 +140,15 @@ class DescribeEnvironmentOperation(OperationBase):
             except BaseException as ex:
                 log.error('Encountered error when retrieve environment resources: {0}.'.format(ex))
                 raise
+
+            # Subcommand
+            _, subcommands = parameter_pool.command
+            subcommand = subcommands[0].upper() if len(subcommands) > 0 else None
+            if subcommand == SubCommandType.OPEN:
+                urlpath = ''
+                if len(subcommands) > 1:
+                    urlpath = subcommands[1] if subcommands[1].startswith('/') else '/' + subcommands[1]
+                shell_utils.open_url(env_info.cname + urlpath, False)
                         
         else:
             # No result. Environment not exist.
@@ -133,7 +157,6 @@ class DescribeEnvironmentOperation(OperationBase):
             
         ret_result = OperationResult(self, response.request_id, message, response.result)
         return ret_result
-
 
 
 class CreateEnvironmentOperation(OperationBase):
@@ -157,24 +180,30 @@ class CreateEnvironmentOperation(OperationBase):
     
     def execute(self, parameter_pool):
         eb_client = self._get_eb_client(parameter_pool)
-        app_name = parameter_pool.get_value(ParameterName.ApplicationName)
-        version_name = parameter_pool.get_value(ParameterName.ApplicationVersionName)        
-        env_name = parameter_pool.get_value(ParameterName.EnvironmentName)
-        stack_name = parameter_pool.get_value(ParameterName.SolutionStack)
+        app_name = parameter_pool.get_value(ParameterName.ApplicationName, False)
+        version_name = eb_utils.check_app_version(parameter_pool, eb_client)         
+        env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
+        stack_name = parameter_pool.get_value(ParameterName.SolutionStack, False)
+        tier = parameter_pool.get_value(ParameterName.EnvironmentTier, False)
 
+        spec = TemplateSpecification()
+        
         # Try load option setting file if exist
-        option_file_location = parameter_pool.get_value(ParameterName.OptionSettingFile)             
-        option_settings = config_file.load_env_option_setting_file(option_file_location,
+        option_location = parameter_pool.get_value(ParameterName.OptionSettingFile, False)
+        option_settings = config_file.load_env_option_setting_file(option_location,
                                                                    quiet = True)
         if option_settings is not None and len(option_settings) > 0:
-            prompt.info(CreateEnvironmentOpMessage.UsingOptionSetting.format(option_file_location))
+            prompt.info(CreateEnvironmentOpMessage.UsingOptionSetting.format(option_location))
         else:
-            option_settings = []
+            option_settings = dict()
 
-        option_remove = set()
-        spec = TemplateSpecification()
-        rds_utils.rds_handler(parameter_pool, spec, stack_name, option_settings, option_remove)
-        self._option_setting_handler(option_settings, option_remove)
+        option_remove = dict()
+        
+        # Process extensions first before we process options
+        self._extension_handler(parameter_pool, spec, stack_name, option_settings, option_remove)
+        
+        # Process options
+        self._option_setting_handler(parameter_pool, spec, stack_name, None, option_settings, option_remove)
                  
         prompt.action(CreateEnvironmentOpMessage.Start.format(env_name))
         try:
@@ -185,7 +214,7 @@ class CreateEnvironmentOperation(OperationBase):
                                                     option_settings = option_settings,
                                                     option_remove = option_remove,
                                                     template_specification = spec,
-                                                    )
+                                                    tier = tier)
         except AlreadyExistException:
             log.info('Environment "{0}" already exist.'.format(env_name))
             prompt.result(CreateEnvironmentOpMessage.AlreadyExist.format(env_name))
@@ -230,11 +259,10 @@ class WaitForCreateEnvironmentFinishOperation(OperationBase):
     
     def execute(self, parameter_pool):
         eb_client = self._get_eb_client(parameter_pool)
-        env_name = parameter_pool.get_value(ParameterName.EnvironmentName)
-        wait_timeout = parameter_pool.get_value(ParameterName.WaitForFinishTimeout)
-        poll_delay = parameter_pool.get_value(ParameterName.PollDelay)
-        create_request_id = parameter_pool.get_value(ParameterName.CreateEnvironmentRequestID)\
-            if parameter_pool.has(ParameterName.CreateEnvironmentRequestID) else None
+        env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
+        wait_timeout = parameter_pool.get_value(ParameterName.WaitForFinishTimeout, False)
+        poll_delay = parameter_pool.get_value(ParameterName.PollDelay, False)
+        create_request_id = parameter_pool.get_value(ParameterName.CreateEnvironmentRequestID)
 
         result = self._wait_for_env_operation_finish(
                          eb_client = eb_client, 
@@ -287,7 +315,7 @@ class TerminateEnvironmentOperation(OperationBase):
     
     def execute(self, parameter_pool):
         eb_client = self._get_eb_client(parameter_pool)
-        env_name = parameter_pool.get_value(ParameterName.EnvironmentName)
+        env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
         prompt.action(TerminateEnvironmentOpMessage.Start.format(env_name))
         
         try:
@@ -327,11 +355,10 @@ class WaitForTerminateEnvironmentFinishOperation(OperationBase):
     
     def execute(self, parameter_pool):
         eb_client = self._get_eb_client(parameter_pool)
-        env_name = parameter_pool.get_value(ParameterName.EnvironmentName)
-        wait_timeout = parameter_pool.get_value(ParameterName.WaitForFinishTimeout)
-        poll_delay = parameter_pool.get_value(ParameterName.PollDelay)
-        terminate_request_id = parameter_pool.get_value(ParameterName.TerminateEnvironmentRequestID)\
-            if parameter_pool.has(ParameterName.TerminateEnvironmentRequestID) else None
+        env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
+        wait_timeout = parameter_pool.get_value(ParameterName.WaitForFinishTimeout, False)
+        poll_delay = parameter_pool.get_value(ParameterName.PollDelay, False)
+        terminate_request_id = parameter_pool.get_value(ParameterName.TerminateEnvironmentRequestID)
         
         result = self._wait_for_env_operation_finish(
                          eb_client = eb_client, 
@@ -383,22 +410,30 @@ class UpdateEnvOptionSettingOperation(OperationBase):
     
     def execute(self, parameter_pool):
         eb_client = self._get_eb_client(parameter_pool)
-        app_name = parameter_pool.get_value(ParameterName.ApplicationName)
-        env_name = parameter_pool.get_value(ParameterName.EnvironmentName)
-        stack_name = parameter_pool.get_value(ParameterName.SolutionStack)
+        app_name = parameter_pool.get_value(ParameterName.ApplicationName, False)
+        env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
+        stack_name = parameter_pool.get_value(ParameterName.SolutionStack, False)
         prompt.action(UpdateEnvironmentOptionSettingOpMessage.Start.format(env_name))
+        tier = parameter_pool.get_value(ParameterName.EnvironmentTier, False)
         
-        location = parameter_pool.get_value(ParameterName.OptionSettingFile)            
-        option_settings = config_file.load_env_option_setting_file(location, quiet = True)        
-        if option_settings is not None and len(option_settings) > 0:
-            prompt.info(UpdateEnvironmentOptionSettingOpMessage.UsingOptionSetting.format(location))
-        else:
-            option_settings = []
-
-        option_remove = set()
         spec = TemplateSpecification() 
-        rds_utils.rds_handler(parameter_pool, spec, stack_name, option_settings, option_remove)
-        self._option_setting_handler(option_settings, option_remove)
+
+        # Try load option setting file if exist
+        option_location = parameter_pool.get_value(ParameterName.OptionSettingFile, False)             
+        option_settings = config_file.load_env_option_setting_file(option_location,
+                                                                   quiet = True)
+        if option_settings is not None and len(option_settings) > 0:
+            prompt.info(UpdateEnvironmentOptionSettingOpMessage.UsingOptionSetting.format(option_location))
+        else:
+            option_settings = dict()
+
+        option_remove = dict()
+        
+        # Process extensions first before we process options
+        self._extension_handler(parameter_pool, spec, stack_name, option_settings, option_remove)
+        
+        # Process options
+        self._option_setting_handler(parameter_pool, spec, stack_name, env_name, option_settings, option_remove)
         
         self._validate_change(parameter_pool, eb_client, app_name, env_name, 
                               option_settings, option_remove, spec)
@@ -407,7 +442,8 @@ class UpdateEnvOptionSettingOperation(OperationBase):
             response = eb_client.update_environment(env_name, 
                                                     option_settings = option_settings,
                                                     option_remove = option_remove,
-                                                    template_specification = spec)
+                                                    template_specification = spec,
+                                                    tier = tier)
         except:
             raise
         else:
@@ -447,8 +483,7 @@ class UpdateEnvOptionSettingOperation(OperationBase):
             log.info('Validating configuration setting failed. Abort command.')
             raise EBSCliException()
         elif warning_count > 0:
-            if parameter_pool.has(ParameterName.Force) \
-                and parameter_pool.get_value(ParameterName.Force) == ServiceDefault.ENABLED:
+            if parameter_pool.get_value(ParameterName.Force) == ServiceDefault.ENABLED:
                 pass
             elif not TerminalBase.ask_confirmation(UpdateEnvironmentOptionSettingOpMessage.Continue):
                 log.info('User cancelled command.')
@@ -471,11 +506,10 @@ class WaitForUpdateEnvOptionSettingFinishOperation(OperationBase):
     
     def execute(self, parameter_pool):
         eb_client = self._get_eb_client(parameter_pool)
-        env_name = parameter_pool.get_value(ParameterName.EnvironmentName)
-        wait_timeout = parameter_pool.get_value(ParameterName.WaitForUpdateTimeout)
-        poll_delay = parameter_pool.get_value(ParameterName.PollDelay)
-#        update_request_id = parameter_pool.get_value(ParameterName.UpdateEnvironmentRequestID)\
-#            if parameter_pool.has(ParameterName.UpdateEnvironmentRequestID) else None
+        env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
+        wait_timeout = parameter_pool.get_value(ParameterName.WaitForUpdateTimeout, False)
+        poll_delay = parameter_pool.get_value(ParameterName.PollDelay, False)
+#        update_request_id = parameter_pool.get_value(ParameterName.UpdateEnvironmentRequestID)
 
         result = self._wait_for_env_operation_finish(
                          eb_client = eb_client, 
@@ -512,4 +546,133 @@ class WaitForUpdateEnvOptionSettingFinishOperation(OperationBase):
                                      result)
 
         return ret_result
+
+
+
+class GetEnvironmentEventsOperation(OperationBase):
+
+    _input_parameters = {
+                         ParameterName.AwsAccessKeyId, 
+                         ParameterName.AwsSecretAccessKey,
+                         ParameterName.ServiceEndpoint, 
+                         ParameterName.EnvironmentName,
+                        }
+    
+    _output_parameters = set()
+    
+    def execute(self, parameter_pool):
+        eb_client = self._get_eb_client(parameter_pool)
+        app_name = parameter_pool.get_value(ParameterName.ApplicationName, False)
+        env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
+        max_records = parameter_pool.get_value(ParameterName.SubCommand)
         
+        try:
+            max_records = int(max_records[0]) if len(max_records) > 0 else ServiceDefault.EVENT_DEFAULT_NUM
+        except ValueError:
+            raise EBSCliException(GetEnvironmentEventsOpMessage.NotValidNumber.format(max_records[0]))        
+
+        response = eb_client.describe_events(app_name, env_name, max_records=max_records)
+
+        if len(response.result) > 0:
+            for event in response.result:
+                msg = '{0}\t{1}\t{2}'.format(event.event_date, 
+                                              event.severity, 
+                                              event.message)
+                prompt.plain(msg)       
+
+        ret_result = OperationResult(self, response.request_id, None, response.result)
+        return ret_result
+
+
+class EnvRequestLogOperation(OperationBase):
+
+    _input_parameters = {
+                         ParameterName.AwsAccessKeyId, 
+                         ParameterName.AwsSecretAccessKey,
+                         ParameterName.ServiceEndpoint, 
+                         ParameterName.EnvironmentName,
+                        }
+    
+    _output_parameters = {
+                          ParameterName.TerminateEnvironmentRequestID,
+                         }
+    
+    def execute(self, parameter_pool):
+        eb_client = self._get_eb_client(parameter_pool)
+        env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
+        _, subcommands = parameter_pool.command
+        info_type = subcommands[0].lower() if len(subcommands) > 0 else EbDefault.TailLog
+        response = eb_client.request_environment_info(env_name, info_type=info_type)
+
+        parameter_pool.put(Parameter(ParameterName.RequestEnvInfoRequestID,
+                                     response.request_id,
+                                     ParameterSource.OperationOutput))   
+
+        ret_result = OperationResult(self, response.request_id, None, None)
+        return ret_result
+
+
+class EnvRetrieveLogOperation(OperationBase):
+    _input_parameters = {
+                         ParameterName.AwsAccessKeyId, 
+                         ParameterName.AwsSecretAccessKey,
+                         ParameterName.ServiceEndpoint, 
+                         ParameterName.EnvironmentName,
+                         ParameterName.WaitForFinishTimeout,
+                         ParameterName.PollDelay,
+                        }
+    
+    _output_parameters = set()
+    
+    def execute(self, parameter_pool):
+        eb_client = self._get_eb_client(parameter_pool)
+        env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
+        wait_timeout = parameter_pool.get_value(ParameterName.WaitForUpdateTimeout, False)
+        poll_delay = parameter_pool.get_value(ParameterName.PollDelay, False)
+        info_request_id = parameter_pool.get_value(ParameterName.RequestEnvInfoRequestID)
+
+        self._wait_for_env_operation_finish(
+                         eb_client = eb_client, 
+                         env_name = env_name, 
+                         original_request_id = info_request_id,
+                         pending_status = EnvironmentStatus.Updating,
+                         expected_health = None,
+                         operation_name = self.__class__.__name__, 
+                         action_name = EnvRetrieveInfoOpMessage.Action,
+                         wait_timeout = wait_timeout, 
+                         poll_delay = poll_delay, 
+                         include_deleted = 'false',
+                         initial_delay = ServiceDefault.UPDATE_ENV_POLL_DELAY,
+                         quiet = False)                                                     
+                                                     
+        # After polling
+        _, subcommands = parameter_pool.command
+        info_type = subcommands[0].lower() if len(subcommands) > 0 else EbDefault.TailLog
+        response = eb_client.retrieve_environment_info(env_name, info_type=info_type)
+        
+        # Sort and find latest log for each instance
+        instance_timestamps = dict()
+        instance_logs = dict()
+        for env_info in response.result:
+            instance_id = env_info.ec2_instance_id
+            timestamp = env_info.sample_timestamp
+            url = env_info.message
+            
+            if instance_id not in instance_timestamps\
+                or instance_timestamps[instance_id] < timestamp:
+                instance_timestamps[instance_id] = timestamp
+                instance_logs[instance_id] = url
+
+        for instance_id in sorted(instance_logs.keys()):
+            content = misc.to_unicode(requests.get(instance_logs[instance_id]).content)
+            prompt.result(os.linesep + 
+                          misc.to_terminal_codepage(EnvRetrieveInfoOpMessage.FileOuputPrefix.format(instance_id)))
+            prompt.result(misc.to_terminal_codepage(content))
+                                
+        ret_result = OperationResult(self,
+                                     None,
+                                     None,
+                                     None)
+
+        return ret_result        
+

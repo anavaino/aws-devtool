@@ -20,8 +20,10 @@ import time as _time
 from lib.utility import misc
 from lib.elasticbeanstalk import eb_utils
 from lib.elasticbeanstalk.servicecall import ElasticBeanstalkClient
+from lib.iam import iam_utils
+from lib.rds import rds_utils
 from scli import prompt
-from scli.constants import ParameterName, ServiceRegionId
+from scli.constants import OutputLevel, ParameterName, ServiceRegionId
 from scli.exception import EnvironmentNotExistError
 from scli.resources import BaseOpMessage
 
@@ -59,10 +61,10 @@ class OperationBase(object):
     
     
     def _get_eb_client(self, parameter_pool):
-        return ElasticBeanstalkClient(parameter_pool.get_value(ParameterName.AwsAccessKeyId), 
-                                      parameter_pool.get_value(ParameterName.AwsSecretAccessKey),
-                                      parameter_pool.get_value(ParameterName.ServiceEndpoint),
-                                      ServiceRegionId[parameter_pool.get_value(ParameterName.Region)])    
+        return ElasticBeanstalkClient(parameter_pool.get_value(ParameterName.AwsAccessKeyId, False), 
+                                      parameter_pool.get_value(ParameterName.AwsSecretAccessKey, False),
+                                      parameter_pool.get_value(ParameterName.ServiceEndpoint, False),
+                                      ServiceRegionId[parameter_pool.get_value(ParameterName.Region, False)])    
     
     def _wait_for_env_operation_finish(self, 
                                        eb_client, 
@@ -76,6 +78,7 @@ class OperationBase(object):
                                        poll_delay, 
                                        include_deleted = 'false',
                                        initial_delay = 0,
+                                       quiet = False
                                        ):
         '''
         Loop polling environment status while it is in specified pending_status
@@ -86,6 +89,10 @@ class OperationBase(object):
         # Just return if not specify either pending status and health expectation
         if pending_status is None and expected_health is None:
             return
+
+        if quiet:
+            ori_prompt_level = prompt.get_level()
+            prompt.set_level(OutputLevel.Quiet)
         
         prompt.action(BaseOpMessage.WaitForEnv.format(env_name, action_name))
         prompt.info(BaseOpMessage.UserCanInterrupt)
@@ -95,6 +102,32 @@ class OperationBase(object):
         event_start_time = None if original_request_id is not None \
             else misc.unixtime_to_utc(_time.time())
         while _time.time() - polling_start_time < wait_timeout:
+            
+            # Retrieve related events
+            log.info('Retrieving events for Environment "{0}" after UTC time {1}.'.\
+                     format(env_name, event_start_time))
+            
+            event_response = eb_client.describe_events(None, 
+                                                       env_name, 
+                                                       request_id = original_request_id, 
+                                                       start_time = event_start_time)
+                
+            self._log_api_result(operation_name, 'DescribeEvents', event_response.result)
+            
+            # Output events related to environment launch
+            if len(event_response.result) > 0:
+                # Having new events
+                event_response.result.reverse()
+                for event in event_response.result:
+                    log.info('{0}\t{1}\t{2}'.format\
+                             (event.event_date, event.severity, event.message))
+                    prompt.plain('{0}\t{1}\t{2}'.format\
+                                (event.event_date, event.severity, event.message))
+                    
+                    event_start_time = misc.unixtime_to_utc(event.event_date_raw + 0.001)
+#            else:
+#                prompt.action(BaseOpMessage.Running)            
+            
             # Describe environment status
             env_response = eb_client.describe_environments(environment_names = env_name, 
                                                            include_deleted = include_deleted)
@@ -120,37 +153,15 @@ class OperationBase(object):
                     
             log.info('Received response for DescribeEnvironemnts call.')
             self._log_api_result(operation_name, 'DescribeEnvironments', env_response.result)
-
-            # Retrieve launch related events
-            log.info('Retrieving events for Environment "{0}" after UTC time {1}.'.\
-                     format(env_name, event_start_time))
-            
-            event_response = eb_client.describe_events(None, 
-                                                       env_name, 
-                                                       request_id = original_request_id, 
-                                                       start_time = event_start_time)
-                
-            self._log_api_result(operation_name, 'DescribeEvents', event_response.result)
-            
-            # Output events related to environment launch
-            if len(event_response.result) > 0:
-                # Having new events
-                event_response.result.reverse()
-                for event in event_response.result:
-                    log.info('{0}\t{1}\t{2}'.format\
-                             (event.event_date, event.severity, event.message))
-                    prompt.plain('{0}\t{1}\t{2}'.format\
-                                (event.event_date, event.severity, event.message))
-                    
-                    event_start_time = misc.unixtime_to_utc(event.event_date_raw + 0.001)
-#            else:
-#                prompt.action(BaseOpMessage.Running)
             
             _time.sleep(poll_delay)
         else:
             log.error('Breach timeout threshold of waiting environment {0}.'.\
                       format(action_name))
         
+        if quiet:
+            prompt.set_level(ori_prompt_level)
+                    
         return env_response.result
     
 
@@ -160,10 +171,19 @@ class OperationBase(object):
                       format(operation_name, misc.collection_to_string(result)))
 
 
-    def _option_setting_handler(self, option_settings, option_remove):
-        eb_utils.trim_vpc_options(option_settings, option_remove) 
+    def _option_setting_handler(self, parameter_pool, template_spec, 
+                                stack_name, env_name, option_settings, option_remove):
+        eb_utils.apply_environment_type(parameter_pool, template_spec, stack_name, env_name, option_settings, option_remove)
+        rds_utils.rds_handler(parameter_pool, template_spec, stack_name, option_settings, option_remove)
+        eb_utils.trim_vpc_options(parameter_pool, option_settings, option_remove)
+        iam_utils.apply_instance_profile(parameter_pool, option_settings, option_remove)
 
-                    
+
+    def _extension_handler(self, parameter_pool, template_spec, 
+                                stack_name, option_settings, option_remove):
+        rds_utils.rds_extension_handler(parameter_pool, template_spec, stack_name, option_settings, option_remove);
+
+
 class OperationResult(object):
     ''' Store execution result of one operation'''
     

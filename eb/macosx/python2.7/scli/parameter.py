@@ -66,7 +66,7 @@ class ParameterPool(object):
 
     @property    
     def command(self):  # one pool can have at most one command
-        return self._pool[ParameterName.Command].value
+        return (self._pool[ParameterName.Command].value, self._pool[ParameterName.SubCommand].value)
 
     @property
     def parameter_names(self):
@@ -85,8 +85,14 @@ class ParameterPool(object):
     def get(self, name):
         return self._pool[name]
 
-    def get_value(self, name):
-        return self._pool[name].value
+    def get_value(self, name, none_if_not_exist = True):
+        try:
+            return self._pool[name].value
+        except KeyError:
+            if none_if_not_exist:
+                return None
+            else:
+                raise
     
     def get_source(self, name):
         return self._pool[name].source
@@ -157,6 +163,19 @@ class ParameterValidator(object):
                 return False
             else:
                 return value.isalnum()
+        else:
+            return False
+
+    @classmethod
+    def validate_RDS_password(cls, value, min_size = None, max_size = None):
+        if value is not None:
+            size = len(value)
+            if min_size is not None and size < min_size:
+                return False
+            elif max_size is not None and size > max_size:
+                return False
+            else:
+                return not("/" in value or "\\" in value or "@" in value)
         else:
             return False
     

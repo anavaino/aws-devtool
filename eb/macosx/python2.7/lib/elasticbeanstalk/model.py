@@ -28,7 +28,21 @@ class BaseModel(object):
             ret += "(" + unicode(attr) + ":" + unicode(value) + ")\n"
         return ret    
 
+def extract_list_elements(json_data, property_name, factory_method):
+    elements = []
+    if property_name in json_data:
+        list_property = json_data[property_name]
+        if list_property:
+            for element in list_property:
+                elements.append(factory_method(element))
+    return elements
 
+def extract_element(json_data, property_name, factory_method):
+    if property_name in json_data:
+        element = json_data[property_name]
+        if element:
+            return factory_method(element)
+    return None
 
 class ApplicationDescription(BaseModel):
     """ <p>Describes the properties of an application.</p>\n"""
@@ -233,7 +247,9 @@ class EnvironmentDescription(BaseModel):
         en._solution_stack_name = json_data[u'SolutionStackName']
         en._status = json_data[u'Status']
         en._template_name = json_data[u'TemplateName']
-        en._version_label = json_data[u'VersionLabel'] 
+        en._version_label = json_data[u'VersionLabel']
+        en._tier = extract_element(json_data, u'Tier', EnvironmentTier.from_json)
+        
         return en
 
     @property
@@ -256,6 +272,11 @@ class EnvironmentDescription(BaseModel):
         """ <p>The application version deployed in this environment.</p>\n"""
         return self._version_label
 
+    @property
+    def tier(self):
+        """ <p>The environment tier for this environment.</p>\n"""
+        return self._tier
+    
     @property
     def solution_stack_name(self):
         """ <p>The name of the <code>SolutionStack</code> deployed with this environment.</p>\n"""
@@ -357,7 +378,57 @@ class EnvironmentDescription(BaseModel):
     @property
     def date_updated_raw(self):
         return self._date_updated_raw
+
+
+class EnvironmentTier(BaseModel):
+    
+    def __init__(self):
+        self._name = None
+        self._type = None
+        self._version = None
+    
+    @classmethod
+    def from_values(cls, tier_name, tier_type, tier_version):
+        et = cls()
+        et._name = tier_name
+        et._type = tier_type
+        et._version = tier_version
+        return et
+    
+    SEPARATOR = u"::"
+    @classmethod
+    def from_serialized_string(cls, serialized_string):
         
+        elements = serialized_string.split(EnvironmentTier.SEPARATOR)
+        if elements and (len(elements)==3):
+            return  cls.from_values(elements[0], elements[1], elements[2])
+        
+        return None
+    
+    @classmethod
+    def from_json(cls, json_data):
+        """ Create instance of EnvironmentTier from structured json data"""
+        et = cls()
+        et._name = json_data[u'Name']
+        et._type = json_data[u'Type']
+        et._version = json_data[u'Version']
+        return et
+    
+    @property
+    def name(self):
+        return self._name
+    
+    @property
+    def type(self):
+        return self._type
+    
+    @property
+    def version(self):
+        return self._version
+    
+    def to_serialized_string(self):
+        return EnvironmentTier.SEPARATOR.join((self.name, self.type, self.version))
+
 
 class EnvironmentResourceDescription(BaseModel):
     """ <p>Describes the AWS resources in use by this environment. This data is live.</p>\n"""
@@ -370,6 +441,7 @@ class EnvironmentResourceDescription(BaseModel):
         self._load_balancers = None 
         self._triggers = None
         self._resources = None
+        self._queues = None
 
     @classmethod
     def from_json(cls, json_data):
@@ -381,15 +453,10 @@ class EnvironmentResourceDescription(BaseModel):
         erd._launch_configurations = json_data[u'LaunchConfigurations']
         erd._load_balancers = json_data[u'LoadBalancers'] 
         erd._triggers = json_data[u'Triggers']
-        erd._resources = []
-        try:
-            if json_data[u'Resources'] is not None:
-                for resource in json_data[u'Resources']:
-                    erd._resources.append(ResourceDescription.from_json(resource))
-        except KeyError:
-            pass
+        erd._resources = extract_list_elements(json_data, u'Resources', ResourceDescription.from_json)
+        erd._queues = extract_list_elements(json_data, u'Queues', Queue.from_json)
         return erd
-
+    
     @property
     def auto_scaling_groups(self):
         """<p> The <code>AutoScalingGroups</code> used by this environment. </p>\n"""
@@ -424,6 +491,9 @@ class EnvironmentResourceDescription(BaseModel):
     def resources(self):
         return self._resources
     
+    @property
+    def queues(self):
+        return self._queues
     
 class ResourceProperty(BaseModel):
 
@@ -447,7 +517,7 @@ class ResourceProperty(BaseModel):
     def value(self):
         return self._value
 
-    
+
 class ResourceDescription(BaseModel):
 
     def __init__(self):
@@ -464,10 +534,7 @@ class ResourceDescription(BaseModel):
         rd._description = json_data[u'Description']
         rd._logical_resource_id = json_data[u'LogicalResourceId']
         rd._physical_resource_id = json_data[u'PhysicalResourceId']
-        rd._properties = []
-        if json_data[u'Properties'] is not None:
-            for resource_property in json_data[u'Properties']:
-                rd._properties.append(ResourceProperty.from_json(resource_property))
+        rd._properties = extract_list_elements(json_data, u'Properties', ResourceProperty.from_json)
         rd._type = json_data[u'Type']
         return rd
 
@@ -490,8 +557,31 @@ class ResourceDescription(BaseModel):
     @property
     def type(self):
         return self._type
+
+
+class Queue(BaseModel):
     
+    def __init__(self):
+        self._name = None
+        self._url = None
     
+    @classmethod
+    def from_json(cls, json_data):
+        """ Create instance of Queue from structured json data"""
+        q = cls()
+        q._name = json_data[u'Name']
+        q._url = json_data[u'URL']
+        return q
+    
+    @property
+    def name(self):
+        return self._name
+    
+    @property
+    def url(self):
+        return self._url
+
+
 class EventDescription(BaseModel):
     """ <p>Describes an event.</p>\n"""
 
@@ -873,9 +963,7 @@ class ConfigurationSettingsDescription(BaseModel):
         csd._deployment_status = json_data[u'DeploymentStatus']
         csd._description = json_data[u'Description']
         csd._environment_name = json_data[u'EnvironmentName']
-        csd._option_settings = list() 
-        for setting in json_data[u'OptionSettings']:
-            csd._option_settings.append(ConfigurationOptionSetting.from_json(setting))        
+        csd._option_settings = extract_list_elements(json_data, u'OptionSettings', ConfigurationOptionSetting.from_json)
         csd._solution_stack_name = json_data[u'SolutionStackName']
         csd._template_name = json_data[u'TemplateName']
         return csd
@@ -1012,3 +1100,42 @@ class ValidationMessage(BaseModel):
         return self._option_name
 
 
+class EnvironmentInfoDescription(BaseModel):
+    """ <p>The information retrieved from the Amazon EC2 instances.</p>\n"""
+
+    def __init__(self):
+        self._info_type = None
+        self._ec2_instance_id = None
+        self._message = None
+        self._sample_timestamp = None
+
+    @classmethod
+    def from_json(cls, json_data):
+        """ Create instance of EnvironmentInfoDescription from structured json data"""
+        eid = cls()
+        eid._info_type = json_data[u'InfoType']
+        eid._ec2_instance_id = json_data[u'Ec2InstanceId']
+        eid._message = json_data[u'Message']
+        eid._sample_timestamp = json_data[u'SampleTimestamp']
+
+        return eid
+
+    @property
+    def info_type(self):
+        """ <p>The type of information retrieved.</p>\n"""
+        return self._info_type
+
+    @property
+    def ec2_instance_id(self):
+        """ <p>The Amazon EC2 Instance ID for this information.</p>\n"""
+        return self._ec2_instance_id
+
+    @property
+    def sample_timestamp(self):
+        """ <p>The time stamp when this information was retrieved.</p>\n"""
+        return self._sample_timestamp
+
+    @property
+    def message(self):
+        """ <p>The retrieved information.</p>\n"""
+        return self._message

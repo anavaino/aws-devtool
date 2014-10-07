@@ -76,7 +76,7 @@ class OperationQueue(object):
                     if operation_result is None:
                         operation_result = OperationResult(op, None, None, None)
                     result.append(operation_result)
-                    log.info('Operation "{0}" succeeded'.format(op.__class__.__name__))
+                    log.info('Operation "{0}" completed'.format(op.__class__.__name__))
                 except AttributeError:
                     raise
                 except Exception:

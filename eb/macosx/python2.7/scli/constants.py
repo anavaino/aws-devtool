@@ -18,7 +18,11 @@
 from lib.utility.basetype import ValuedEnum
 from lib.utility.basetype import OrderedEnum
 
-EbCliVersion = 'v2.3.0'
+EbCliVersion = 'v2.6.3'
+
+class Key(object):
+    Default = 'default'
+    Options = 'options'
 
 #----------------------------------------------
 # Parameters
@@ -26,6 +30,7 @@ EbCliVersion = 'v2.3.0'
 # Standard name of parameters used in Elastic Beanstalk Command Line Interface
 ParameterName = ValuedEnum({
     u'Command' : 0,
+    u'SubCommand' : 1,
     
     u'AwsAccessKeyId' : 11,
     u'AwsSecretAccessKey' : 12,
@@ -42,8 +47,12 @@ ParameterName = ValuedEnum({
     u'EnvironmentName':121,
     u'EnvironmentId':122,
     
+    u'EnvironmentTier':150,
+    
     u'SolutionStack' : 201,
     u'OriginalSolutionStack' : 202,
+
+    u'EnvironmentType' : 211,
 
     u'Branches': 301,
     u'CurrentBranch': 302,
@@ -68,6 +77,8 @@ ParameterName = ValuedEnum({
     u'RdsMasterPassword': 623,
     u'RdsDbName' : 631,    
     u'RdsDeletionPolicy': 651,
+
+    u'InstanceProfileName': 701,
     
     u'ServiceConnectionTimeout' : 1001,
     u'ServiceRetryThreshold' : 1011,
@@ -81,9 +92,10 @@ ParameterName = ValuedEnum({
     
     u'CreateEnvironmentRequestID' : 2001,
     u'TerminateEnvironmentRequestID' : 2002,
-    u'UpdateEnvironmentRequestID' : 2002,
+    u'UpdateEnvironmentRequestID' : 2003,
+    u'RequestEnvInfoRequestID' : 2004,
     
-    u'AvailableSolutionStacks': 2101
+    u'AvailableSolutionStacks': 2101,
 })
 
 
@@ -96,6 +108,37 @@ ParameterSource = ValuedEnum({
     u'OperationOutput' : 4,
     u'Default' : 10,
 })
+
+#----------------------------------------------
+# Command
+#----------------------------------------------
+CommandType = OrderedEnum([
+                          u'INIT',
+                          u'BRANCH',
+                          u'START', 
+                          u'STATUS', 
+                          u'UPDATE',
+                          u'STOP',
+                          u'DELETE',
+                          u'LOGS',
+                          u'EVENTS',
+                          u'PUSH',
+                          ])
+
+SubCommandType = OrderedEnum([
+                          # LOGS command
+                          u'TAIL',
+                          u'OPEN'
+                          ])
+
+CommandCombination = {
+    CommandType.LOGS : {
+        Key.Default : SubCommandType.TAIL,
+        Key.Options : [
+            SubCommandType.TAIL,
+        ]
+    },
+}
 
 
 #----------------------------------------------
@@ -110,7 +153,7 @@ class TerminalConstant(object):
     FALSE = u'False'
 
     RdsSnapshotListNumber = 5
-    
+    IamProfileListNumber = 6    
 
 #----------------------------------------------
 # Services
@@ -182,6 +225,17 @@ SnippetBucket = {
     ServiceRegion.UsWest2 : u'https://s3.amazonaws.com/elasticbeanstalk-env-resources-us-west-2/eb_snippets',
 }
 
+PolicyBucket = {
+    ServiceRegion.ApNortheast1 : u'https://elasticbeanstalk-env-resources-ap-northeast-1.s3.amazonaws.com/eb_policies',
+    ServiceRegion.ApSoutheast1 : u'https://elasticbeanstalk-env-resources-ap-southeast-1.s3.amazonaws.com/eb_policies',
+    ServiceRegion.ApSoutheast2 : u'https://elasticbeanstalk-env-resources-ap-southeast-2.s3.amazonaws.com/eb_policies',
+    ServiceRegion.EuWest1 : u'https://elasticbeanstalk-env-resources-eu-west-1.s3.amazonaws.com/eb_policies',
+    ServiceRegion.SaEast1 : u'https://elasticbeanstalk-env-resources-sa-east-1.s3.amazonaws.com/eb_policies',
+    ServiceRegion.UsEast1 : u'https://s3.amazonaws.com/elasticbeanstalk-env-resources-us-east-1/eb_policies',
+    ServiceRegion.UsWest1 : u'https://elasticbeanstalk-env-resources-us-west-1.s3.amazonaws.com/eb_policies',
+    ServiceRegion.UsWest2 : u'https://elasticbeanstalk-env-resources-us-west-2.s3.amazonaws.com/eb_policies',
+}
+
 DevToolsEndpoint = {
     ServiceRegion.ApNortheast1 : u'git.elasticbeanstalk.ap-northeast-1.amazonaws.com',
     ServiceRegion.ApSoutheast1 : u'git.elasticbeanstalk.ap-southeast-1.amazonaws.com',
@@ -193,6 +247,25 @@ DevToolsEndpoint = {
     ServiceRegion.UsWest2 : u'git.elasticbeanstalk.us-west-2.amazonaws.com',
 }
 
+
+class EbDefault(object):
+
+    TailLog = u'tail'
+    
+    RoleAssumePolicyUrlMask = u'{0}/role-assume-policy'
+    DefaultRoleName = u'aws-elasticbeanstalk-ec2-role'
+    DefaultInstanceProfileName = u'aws-elasticbeanstalk-ec2-role'
+    
+
+class DevToolsDefault(object):
+    NameDelimiter = u'-'
+    VersionNameRe = u'^git-{0}-\d+$'
+    VersionNameMask = u'git-{0}-{1}'
+    
+    AwsPush = [u'git', u'aws.push']
+    AwsCreateAppVersion = [u'git', u'aws.createapplicationversion']
+    
+    
 #----------------------------------------------
 # Solution stacks and sample app
 #----------------------------------------------
@@ -200,6 +273,9 @@ DevToolsEndpoint = {
 class DefaultAppSource(object):
     Namespace = u'aws:cloudformation:template:parameter'
     OptionName = u'AppSource' 
+
+class LegacyContainer(object):
+    Regex = u'\(legacy\) *$'
 
 class TomcatAppContainer(object):
     Name = u'Tomcat'
@@ -220,14 +296,6 @@ class PythonAppContainer(object):
 class RubyAppContainer(object):
     Name = u'Ruby'
     Regex = u'^(32|64)bit Amazon Linux running Ruby .*'
-
-KnownAppContainers = {
-    TomcatAppContainer,
-    PhpAppContainer,
-    IisAppContainer,
-    PythonAppContainer,
-    RubyAppContainer,
-}
 
 
 #----------------------------------------------
@@ -260,14 +328,6 @@ class RdsDefault(object):
                        u'sqlserver-se' : 15,
                        u'sqlserver-web' : 15,
                        }
-    
-    EngineMap = {
-        TomcatAppContainer : u'mysql',
-        PhpAppContainer : u'mysql',
-        IisAppContainer : u'sqlserver-ex',
-        PythonAppContainer: u'mysql',                     
-        RubyAppContainer: u'mysql',                     
-    }
     
     DeletionPolicySnapshot = u'Snapshot'
     DeletionPolicyDelete = u'Delete'
@@ -319,7 +379,15 @@ class RdsDefault(object):
     
     PasswordMinSize = 8
     PasswordMaxSize = 41
+
     
+#----------------------------------------------
+# IAM
+#----------------------------------------------
+IamEndpoint = u'https://iam.amazonaws.com'
+IamRegion = u'us-east-1'
+    
+        
 #----------------------------------------------
 # Application and environment default
 #----------------------------------------------
@@ -371,6 +439,9 @@ class ServiceDefault(object):
 
     STATUS_EVENT_LEVEL = EventSeverity.Warn
     STATUS_EVENT_MAX_NUM = 3
+    
+    EVENT_DEFAULT_NUM = 10
+
     
     class Environment(object):
         REGEX_NAME_FILTER = u'[^A-Za-z0-9\-]+'
@@ -424,6 +495,7 @@ class EbLocalDir(object):
     Path = u'.elasticbeanstalk'
     Name = Path + u'/'
     NameRe = Path + u'/'
+    LogDir = u'log'
 
     
 class EbLogFile(object):
@@ -441,15 +513,19 @@ class EbConfigFile(object):
     RootSectionKeys = {
         ParameterName.AwsCredentialFile, 
         ParameterName.ApplicationName, 
+        ParameterName.ApplicationVersionName, 
         ParameterName.DevToolsEndpoint,
         ParameterName.EnvironmentName, 
-        ParameterName.OptionSettingFile, 
+        ParameterName.OptionSettingFile,
+        ParameterName.EnvironmentTier, 
         ParameterName.SolutionStack, 
         ParameterName.Region, 
         ParameterName.ServiceEndpoint, 
         ParameterName.RdsEnabled,
         ParameterName.RdsSourceSnapshotName,
-        ParameterName.RdsDeletionPolicy,         
+        ParameterName.RdsDeletionPolicy,
+        ParameterName.InstanceProfileName,
+        ParameterName.EnvironmentType,
     }
 
     BranchResetParameters = {
@@ -461,11 +537,15 @@ class EbConfigFile(object):
     BranchSectionName = u'branches'
     BranchSectionPrefix = u'branch' + SectionNameDelimiter
     BranchSectionKeys = {
+        ParameterName.ApplicationVersionName, 
         ParameterName.EnvironmentName,
+        ParameterName.EnvironmentTier,
         ParameterName.OptionSettingFile, 
         ParameterName.RdsEnabled,
         ParameterName.RdsSourceSnapshotName,
-        ParameterName.RdsDeletionPolicy,         
+        ParameterName.RdsDeletionPolicy,
+        ParameterName.InstanceProfileName,
+        ParameterName.EnvironmentType,
     }
     BranchSectionHiddenKeys = {
         ParameterName.RdsMasterPassword,         
@@ -498,7 +578,8 @@ class FileErrorConstant(object):
 class GitDefault(object):
     HeadRe = u'\* .+'
     GetBranch = [u'git', u'branch']
-    
+    GetHeadHash = [u'git', u'rev-parse', u'HEAD']
+        
 class GitIgnoreFile(object):
     Name = u'.gitignore'
     Path = u'.'
@@ -539,6 +620,9 @@ LocalOptionSettings = {
         u'MinSize',
         u'Custom Availability Zones',
     },
+    u'aws:autoscaling:updatepolicy:rollingupdate' : {
+        u'RollingUpdateEnabled',
+    },
     u'aws:rds:dbinstance' : {
         u'DBDeletionPolicy',
         u'DBEngine',
@@ -554,9 +638,21 @@ LocalOptionSettings = {
         u'ELBScheme',
         u'AutoScalingGroupScheme',
     },
+    u'aws:elasticbeanstalk:sqsd' : {
+        u'WorkerQueueURL',
+        u'HttpPath',
+        u'MimeType',
+        u'MaxRetries',
+        u'HttpConnections',
+        u'ConnectTimeout',
+        u'InactivityTimeout',
+        u'VisibilityTimeout',
+        u'RetentionPeriod',
+    },
 }
 
 OptionSettingContainerPrefix = u'aws:elasticbeanstalk:container'
+OptionSettingTemplatePrefix = u'aws:cloudformation:template'
 
 class OptionSettingApplicationEnvironment(object): 
     Namespace = u'aws:elasticbeanstalk:application:environment'
@@ -568,8 +664,19 @@ class OptionSettingApplicationEnvironment(object):
 class OptionSettingVPC(object): 
     Namespace = u'aws:ec2:vpc'
     MagicOptionName = u'Subnets'
+    DBSubnets = u'DBSubnets'
     TrimOption = {
         u'aws:autoscaling:asg' : {
             u'Custom Availability Zones',
         },                  
     }
+
+class OptionSettingIAMProfile(object): 
+    Namespace = u'aws:autoscaling:launchconfiguration'
+    OptionName = u'IamInstanceProfile'
+
+
+class OptionSettingEnvironmentType(object): 
+    Namespace = u'aws:elasticbeanstalk:environment'
+    OptionName = u'EnvironmentType'
+    

@@ -21,7 +21,7 @@ import stat
 from ConfigParser import MissingSectionHeaderError
 from collections import OrderedDict
 
-from lib.elasticbeanstalk.model import ConfigurationOptionSetting
+from lib.elasticbeanstalk.model import EnvironmentTier
 from lib.rds import rds_utils
 from lib.utility import misc
 from lib.utility.configfile_parser import NoSectionConfigParser, SectionedConfigParser
@@ -42,11 +42,6 @@ log = logging.getLogger('cli')
 # Helper
 #------------------------------
 
-def create_directory(directory):
-    ''' Create a directory at location. Return if exist. '''                    
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    
     
 def rotate_file(location, max_retry = FileDefaultParameter.RotationMaxRetry):
     ''' Rotate a file by adding a incremental postfix to filename'''
@@ -131,17 +126,20 @@ def add_ignore_file(location):
     with open(location, 'a+') as f:
         # Search for filenames
         f.seek(0, os.SEEK_SET)
-        for line in f:
+        lines = f.readlines()
+        for line in lines:
             for name, regex in relist.items():
                 if regex.match(line):
                     namelist[name] = False
         
         # Add filenames if not present in ignore file
         f.seek(0, os.SEEK_END)
+        if len(lines) > 0 and not os.linesep in lines[-1]: # Add EOL if last line doesn't have it
+            f.write(os.linesep)
         for name, add in namelist.items():
             if add:
                 log.debug(u'Adding file "{0}" to git ignore list.'.format(name))
-                f.write(u'{0}'.format(name))
+                f.write(u'{0}{1}'.format(name, os.linesep))
   
 
 #------------------------------
@@ -166,10 +164,10 @@ def read_aws_credential_file(location, parameter_pool, func_matrix, source, quie
         for branch, name, from_file_func in func_matrix:
             try:
                 if branch:
-                    env_name = parameter_pool.get_value(ParameterName.Branches)\
+                    env_name = parameter_pool.get_value(ParameterName.Branches, False)\
                         [branch][ParameterName.EnvironmentName]
                 else:
-                    env_name = parameter_pool.get_value(ParameterName.EnvironmentName)
+                    env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)
             except BaseException:
                 # No environment name. Set it to invalid value. 
                 env_name = u''
@@ -183,7 +181,7 @@ def read_aws_credential_file(location, parameter_pool, func_matrix, source, quie
                 value = parser.get(key_name)
                 value = from_file_func(value) if from_file_func is not None else value
                 if branch:
-                    branch_setting = parameter_pool.get_value(ParameterName.Branches)[branch]
+                    branch_setting = parameter_pool.get_value(ParameterName.Branches, False)[branch]
                     branch_setting[name] = value
                 else:
                     parameter_pool.put(Parameter(name, value, source))
@@ -213,12 +211,12 @@ def write_aws_credential_file(location, parameter_pool,
         
         for branch, name, to_file_func in func_matrix:
             if branch:
-                value = parameter_pool.get_value(ParameterName.Branches)[branch][name]
-                env_name = parameter_pool.get_value(ParameterName.Branches)[branch]\
+                value = parameter_pool.get_value(ParameterName.Branches, False)[branch][name]
+                env_name = parameter_pool.get_value(ParameterName.Branches, False)[branch]\
                     [ParameterName.EnvironmentName]       
             else:
-                value = parameter_pool.get_value(name)
-                env_name = parameter_pool.get_value(ParameterName.EnvironmentName)       
+                value = parameter_pool.get_value(name, False)
+                env_name = parameter_pool.get_value(ParameterName.EnvironmentName, False)       
             
             if to_file_func:
                 value = to_file_func(value) 
@@ -288,8 +286,7 @@ def read_rds_master_password(env_name, location):
     
     read_aws_credential_file(location, empty_pool, func_matrix, empty_pool, True)
     
-    return empty_pool.get_value(ParameterName.RdsMasterPassword)\
-        if empty_pool.has(ParameterName.RdsMasterPassword) else None
+    return empty_pool.get_value(ParameterName.RdsMasterPassword)
         
 #------------------------------
 # Config File
@@ -313,21 +310,33 @@ def _empty_string_to_none(value):
     else:
         return value
 
+def serialize_environment_tier(value):
+    if value is None:
+        return u'';
+    else:
+        return value.to_serialized_string()
 
+def deserialize_environment_tier(value):
+    return EnvironmentTier.from_serialized_string(value)
+    
 # Format: ParameterName => (from_file function, to_file function)
 ConfigFileParameters = OrderedDict([
     (ParameterName.AwsCredentialFile, (None, None)), 
     (ParameterName.ApplicationName, (None, None)), 
+    (ParameterName.ApplicationVersionName, (None, None)),
     (ParameterName.DevToolsEndpoint, (None, None)), 
     (ParameterName.EnvironmentName, (None, None)), 
     (ParameterName.OptionSettingFile,(None, None)),
     (ParameterName.SolutionStack, (None, None)), 
+    (ParameterName.EnvironmentTier, (deserialize_environment_tier, serialize_environment_tier)), 
     (ParameterName.Region, (_region_id_to_region, _region_to_region_id)), 
     (ParameterName.ServiceEndpoint, (None, None)), 
     (ParameterName.RdsEndpoint,  (None, None)), 
     (ParameterName.RdsEnabled, (misc.string_to_boolean, misc.bool_to_yesno)), 
     (ParameterName.RdsSourceSnapshotName, (_empty_string_to_none, _none_to_empty_string)), 
     (ParameterName.RdsDeletionPolicy, (None, None)), 
+    (ParameterName.InstanceProfileName, (None, None)), 
+    (ParameterName.EnvironmentType, (None, None)),
 ])
 
 
@@ -414,7 +423,7 @@ def load_eb_config_file(location, parameter_pool, quiet = False):
         for name, ori_name in EbConfigFile.BranchResetParameters.iteritems():
             if parameter_pool.has(name):
                 parameter_pool.put(Parameter(ori_name, 
-                                             parameter_pool.get_value(name), 
+                                             parameter_pool.get_value(name, False), 
                                              ParameterSource.ConfigFile))
 
         log.info(u'Finished reading from EB configuration file.')
@@ -441,12 +450,18 @@ def save_eb_config_file(location, parameter_pool, quiet = False):
 
         # add known session
         for section_name, (condition, keys) in EbConfigFile.KnownSections.iteritems():
-            if parameter_pool.has(condition) and parameter_pool.get_value(condition):
+            if parameter_pool.get_value(condition):
                 log.debug(u'Create section "{0}" in config file.'.format(section_name))
                 parser.add_section(section_name)
                 for key in sorted(keys):
                     if parameter_pool.has(key):
-                        value = parameter_pool.get_value(key)
+                        
+                        #TODO: Generalize this special case
+                        if key == ParameterName.ApplicationVersionName\
+                            and parameter_pool.get_source(key) == ParameterSource.Default:
+                            continue
+                        
+                        value = parameter_pool.get_value(key, False)
                         if key in ConfigFileParameters:
                             _, to_file = ConfigFileParameters[key]
                             if to_file is not None:
@@ -455,17 +470,17 @@ def save_eb_config_file(location, parameter_pool, quiet = False):
 
         # add branch mapping sections
         if parameter_pool.has(ParameterName.BranchMapping)\
-            and len(parameter_pool.get_value(ParameterName.BranchMapping)) > 0:
+            and len(parameter_pool.get_value(ParameterName.BranchMapping, False)) > 0:
             log.debug(u'Create section "{0}" in config file.'.format(EbConfigFile.BranchSectionName))
             parser.add_section(EbConfigFile.BranchSectionName)
-            branch_map = parameter_pool.get_value(ParameterName.BranchMapping)
+            branch_map = parameter_pool.get_value(ParameterName.BranchMapping, False)
             for key in sorted(branch_map.keys()):
                 parser.set(EbConfigFile.BranchSectionName, key, branch_map[key])
 
         # add branch environment sections
         if parameter_pool.has(ParameterName.Branches)\
-            and len(parameter_pool.get_value(ParameterName.Branches)) > 0:
-            branches = parameter_pool.get_value(ParameterName.Branches)
+            and len(parameter_pool.get_value(ParameterName.Branches, False)) > 0:
+            branches = parameter_pool.get_value(ParameterName.Branches, False)
             for branch_name in sorted(branches.keys()):
                 section_name = EbConfigFile.BranchSectionPrefix + branch_name
                 log.debug(u'Create section "{0}" in config file.'.format(section_name))
@@ -482,7 +497,7 @@ def save_eb_config_file(location, parameter_pool, quiet = False):
             
         # add else
         if parameter_pool.has(ParameterName.ConfigFileExtra): 
-            extra_config = parameter_pool.get_value(ParameterName.ConfigFileExtra) 
+            extra_config = parameter_pool.get_value(ParameterName.ConfigFileExtra, False) 
             for section, pairs in sorted(extra_config.iteritems(), key=operator.itemgetter(0)):
                 if not parser.has_section(section):
                     log.debug(u'Create section "{0}" in config file.'.format(section))
@@ -494,7 +509,7 @@ def save_eb_config_file(location, parameter_pool, quiet = False):
         log.info(u'Finished writing EB configuration file.')
         
     except BaseException as ex:
-        log.error(u'Failed to save EB configuration file, because: "{0}"'.format(ex))
+        log.exception(u'Failed to save EB configuration file, because: "{0}"'.format(ex))
         prompt.error(ConfigFileErrorMessage.WriteError.format(location))        
         raise
           
@@ -507,7 +522,7 @@ def load_env_option_setting_file(location, option_settings = None, quiet = False
     log.info(u'Reading environment option settings from file at "{0}".'.format(location))
     
     if option_settings is None:
-        option_settings = []
+        option_settings = dict()
     
     try:
         parser = SectionedConfigParser()
@@ -515,11 +530,12 @@ def load_env_option_setting_file(location, option_settings = None, quiet = False
         
         for section in parser.sections():
             for option, value in parser.items(section):
-                cos = ConfigurationOptionSetting()
-                cos._namespace = misc.to_unicode(section)
-                cos._option_name = misc.to_unicode(option)
-                cos._value = misc.to_unicode(value)
-                option_settings.append(cos) 
+                section = misc.to_unicode(section)
+                option = misc.to_unicode(option)
+                value = misc.to_unicode(value) 
+                if section not in option_settings:
+                    option_settings[section] = dict()
+                option_settings[section][option] = value 
         
         log.debug(u'Option settings read from file include: "{0}".'.\
                   format(misc.collection_to_string(option_settings)))
@@ -530,37 +546,37 @@ def load_env_option_setting_file(location, option_settings = None, quiet = False
     except BaseException as ex:
         log.error(u'Failed to load environment option setting file, because: "{0}"'.format(ex))
         if quiet:
-            return []
+            return option_settings
         else:
             prompt.error(OptionSettingFileErrorMessage.ReadError.format(location))        
             raise
 
             
 def save_env_option_setting_file(location, option_settings):
+    log.info(u'Try loading option settings file from {0}'.format(location))
+#    old_option_settings = load_env_option_setting_file(location, quiet = True)
+    
     log.info(u'Writing environment option settings to file at "{0}".'.format(location))
     try:
         parser = SectionedConfigParser()
         
-        for setting in option_settings:
-            
-            if setting.namespace.startswith(OptionSettingContainerPrefix):
-                pass
-            elif setting.namespace.startswith(OptionSettingApplicationEnvironment.Namespace):
-                if setting.option_name in OptionSettingApplicationEnvironment.IgnoreOptionNames:
-                    continue
-                else:
-                    pass
-            # Skip if option setting is on in local option setting list
-            elif setting.namespace not in LocalOptionSettings \
-                or setting.option_name not in LocalOptionSettings[setting.namespace]:
+        for namespace, options in sorted(option_settings.iteritems()):
+            if len(options) < 1:
                 continue
             
-            if not parser.has_section(setting.namespace):
-                parser.add_section(setting.namespace)
+            for option, value in sorted(options.iteritems()):
+                if not _is_whitelisted_option(namespace, option):
+#                    and (namespace not in old_option_settings \
+#                         or option not in old_option_settings[namespace]):
+                    continue
                 
-            if setting.value is None:
-                setting._value = u''
-            parser.set(setting.namespace, setting.option_name, setting.value)
+                if not parser.has_section(namespace):
+                    parser.add_section(namespace)
+                
+                # Add option setting to new file
+                if value is None:
+                    value = u''
+                parser.set(namespace, option, value)
         
         parser.write(location)
         log.debug(u'Option settings written to file include: "{0}".'.\
@@ -570,7 +586,19 @@ def save_env_option_setting_file(location, option_settings):
     except BaseException as ex:
         log.error(u'Failed to save environment option setting file, because: "{0}"'.format(ex))
         prompt.error(OptionSettingFileErrorMessage.WriteError.format(location))        
-        raise
-    
-    
-        
+        raise    
+
+
+def _is_whitelisted_option(namespace, option_name):
+    if namespace.startswith(OptionSettingContainerPrefix):
+        return True
+    elif namespace.startswith(OptionSettingApplicationEnvironment.Namespace):
+        if option_name in OptionSettingApplicationEnvironment.IgnoreOptionNames:
+            return False
+        else:
+            return True
+    elif namespace not in LocalOptionSettings \
+        or option_name not in LocalOptionSettings[namespace]:
+        return False
+
+    return True

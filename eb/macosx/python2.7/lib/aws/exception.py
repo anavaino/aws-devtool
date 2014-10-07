@@ -16,7 +16,7 @@
 
 class AwsErrorCode(object):
     '''AWS common error code'''
-    
+    AccessDenied = u'AccessDenied'
     InsufficientPrivileges = u'InsufficientPrivileges'
     InvalidClientTokenId = u'InvalidClientTokenId'
     InvalidParameterCombination = u'InvalidParameterCombination'
@@ -84,4 +84,10 @@ class OptInRequiredException(AwsServiceException):
         if not issubclass(ex.__class__, AwsServiceException):
             raise AttributeError(u'Must initialize from instance of AwsServiceException subclass.')
         super(OptInRequiredException, self).__init__(ex.message, ex.code, ex.http_code)
+        
+class AccessDeniedException(AwsServiceException):
+    def __init__(self, ex):
+        if not issubclass(ex.__class__, AwsServiceException):
+            raise AttributeError(u'Must initialize from instance of AwsServiceException subclass.')
+        super(AccessDeniedException, self).__init__(ex.message, ex.code, ex.http_code)        
         

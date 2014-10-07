@@ -21,6 +21,7 @@ from lib.utility import misc
 from scli import prompt
 from scli.constants import ParameterSource as Source
 from scli.constants import TerminalConstant
+from scli.exception import EBSCliException
 from scli.resources import TerminalMessage
 from scli.resources import TerminalPromptAskingMessage
 from scli.resources import TerminalPromptSettingParameterMessage
@@ -58,7 +59,7 @@ class TerminalBase(object):
             if no_echo:
                 value = u'******' if display_value is None else display_value
             else:
-                original_value = parameter_pool.get_value(parameter_name)
+                original_value = parameter_pool.get_value(parameter_name, False)
                 value = original_value if display_value is None else display_value
             message = TerminalPromptAskingMessage[parameter_name].\
                 format(TerminalMessage.CurrentValue.format(value))
@@ -97,19 +98,22 @@ class TerminalBase(object):
 
         
     @classmethod    
-    def single_choice(cls, choices, title = None, 
+    def single_choice(cls, choice_list, title = None, 
                        message = None, can_return_none = False):
+        if choice_list and not isinstance(choice_list, list):
+            raise EBSCliException(u'Invalid parameter type.')
+        
         if message is None:
             message = TerminalMessage.SingleChoice
 
         if title is not None:
             print title
-        for index, choice in enumerate(choices):
+        for index, choice in enumerate(choice_list):
             print u'{0}) {1}'.format(index + 1, choice)
 
         select = -1
-        while select not in range(1, len(choices) + 1):
-            select = cls.line_input(u'{0} ({1} to {2}): '.format(message, 1, len(choices)), True)
+        while select not in range(1, len(choice_list) + 1):
+            select = cls.line_input(u'{0} ({1} to {2}): '.format(message, 1, len(choice_list)), True)
             if select is None and can_return_none:
                 return None # No input from customer, return None
             try:
@@ -141,7 +145,7 @@ class TerminalBase(object):
         # Set parameter value if not specified as before with higher priority
         if parameter_pool.has(name) \
                 and Source.is_ahead(parameter_pool.get_source(name), Source.Terminal):
-            value = parameter_pool.get_value(name)
+            value = parameter_pool.get_value(name, False)
         else:
             parameter_pool.put(Parameter(name, value, source), force)
         

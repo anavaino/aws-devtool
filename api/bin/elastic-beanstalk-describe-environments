@@ -54,5 +54,6 @@ AWS::Client::CommandLine.new do |client|
 
   client.filter 'DateCreated' do |val| Time.at(val)  end
   client.filter 'DateUpdated' do |val| Time.at(val)  end
+  client.filter 'Tier'        do |val| [val['Name'], val['Type'], val['Version']].join '::' end
   client.exclude('Resources')
 end.run(ARGV)

@@ -41,9 +41,8 @@ class RdsTerminal(TerminalBase):
     @classmethod
     def ask_rds_creation(cls, parameter_pool):
         
-        stack = parameter_pool.get_value(PName.SolutionStack)
-        snippet_url = parameter_pool.get_value(PName.RdsSnippetUrl)
-        if not rds_utils.is_rds_snippet_compatible(parameter_pool, stack, snippet_url):
+        stack = parameter_pool.get_value(PName.SolutionStack, False)
+        if not rds_utils.is_rds_snippet_compatible(parameter_pool, stack):
             parameter_pool.put(Parameter(PName.RdsEnabled, 
                                          False, 
                                          PSource.Terminal), 
@@ -52,7 +51,7 @@ class RdsTerminal(TerminalBase):
             return  # solution stack not compatible with snippet
         
         if parameter_pool.has(PName.RdsEnabled):
-            ori_rds_creation = parameter_pool.get_value(PName.RdsEnabled)
+            ori_rds_creation = parameter_pool.get_value(PName.RdsEnabled, False)
             msg = AskMsg[PName.RdsEnabled].format(TerminalMessage.CurrentValue.\
                                                   format(misc.bool_to_yesno(ori_rds_creation)))
             raw_answer = cls.line_input(msg, True)
@@ -75,8 +74,7 @@ class RdsTerminal(TerminalBase):
 
     @classmethod
     def ask_snapshot_name(cls, parameter_pool):
-        original_value = parameter_pool.get_value(PName.RdsSourceSnapshotName) \
-            if parameter_pool.has(PName.RdsSourceSnapshotName) else None
+        original_value = parameter_pool.get_value(PName.RdsSourceSnapshotName)
         append_message = TerminalMessage.CurrentValue.format(RdsTerminalMessage.NoSnapshot)\
              if original_value is None else TerminalMessage.CurrentValue.format(original_value)        
         print(RdsTerminalMessage.RdsSnapshotNameSelect.format(append_message))
@@ -89,7 +87,7 @@ class RdsTerminal(TerminalBase):
             snapshot_list.append(sorted_snapshots[i].db_snapshot_identifier)
         snapshot_list.append(RdsTerminalMessage.OtherSnapshot)
         
-        snapshot_index = cls.single_choice(snapshot_list, None, None, True)
+        snapshot_index = cls.single_choice(choice_list = snapshot_list, can_return_none = True)
         if snapshot_index == 0:
             # Create RDS instance from scratch
             value = None
@@ -110,7 +108,7 @@ class RdsTerminal(TerminalBase):
             if password is None:
                 return 
             else:
-                if not ParameterValidator.validate_alphanumeric(password,
+                if not ParameterValidator.validate_RDS_password(password,
                                                                 RdsDefault.PasswordMinSize,
                                                                 RdsDefault.PasswordMaxSize):
                     prompt.error(RdsTerminalMessage.PasswordWrongFormat)
@@ -133,7 +131,7 @@ class RdsTerminal(TerminalBase):
     @classmethod
     def ask_delete_to_snapshot(cls, parameter_pool):
         if parameter_pool.has(PName.RdsDeletionPolicy):
-            original_value = parameter_pool.get_value(PName.RdsDeletionPolicy)
+            original_value = parameter_pool.get_value(PName.RdsDeletionPolicy, False)
             display_value = RdsDefault.del_policy_to_bool(original_value)
             display_value = misc.bool_to_yesno(display_value)
         else:

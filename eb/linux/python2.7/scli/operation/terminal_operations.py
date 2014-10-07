@@ -65,10 +65,8 @@ class AskForMissiongParameterOperation(OperationBase):
 
 
     def _check_rds_parameter(self, pool):
-        stack_name = pool.get_value(ParameterName.SolutionStack)\
-            if pool.has(ParameterName.EnvironmentName) else None
-        rds_enable = pool.get_value(ParameterName.RdsEnabled) \
-            if pool.has(ParameterName.RdsEnabled) else None
+        stack_name = pool.get_value(ParameterName.SolutionStack)
+        rds_enable = pool.get_value(ParameterName.RdsEnabled)
             
         if rds_enable and rds_utils.is_require_rds_parameters(pool)\
             and rds_utils.is_rds_snippet_compatible(pool, stack_name):
@@ -85,10 +83,13 @@ class AskForConfigFileParameterOperation(OperationBase):
         parameters = {ParameterName.AwsAccessKeyId,
                       ParameterName.AwsSecretAccessKey,
                       ParameterName.Region,
+                      ParameterName.EnvironmentTier,
                       ParameterName.SolutionStack,
                       ParameterName.ApplicationName,
                       ParameterName.EnvironmentName,
                       ParameterName.RdsEnabled,
+                      ParameterName.InstanceProfileName,
+                      ParameterName.EnvironmentType,
                       }
         
         terminal = Terminal()
@@ -111,8 +112,7 @@ class RegisterBranchOperation(OperationBase):
             branch_pool = _copy.deepcopy(parameter_pool)
             
             # Fill branch environment parameter values
-            branches = parameter_pool.get_value(ParameterName.Branches)\
-                if parameter_pool.has(ParameterName.Branches) else None
+            branches = parameter_pool.get_value(ParameterName.Branches)
             for key in EbConfigFile.BranchSectionKeys | EbConfigFile.BranchSectionHiddenKeys:
                 if branches and current_branch in branches.keys() \
                     and key in branches[current_branch].keys():
@@ -129,7 +129,7 @@ class RegisterBranchOperation(OperationBase):
                                    ParameterName.DevToolsEndpoint):  
                         branch_pool.remove(key)
             branch_pool.put(Parameter(ParameterName.DefaultEnvironmentName,
-                                      parameter_pool.get_value(ParameterName.EnvironmentName),
+                                      parameter_pool.get_value(ParameterName.EnvironmentName, False),
                                       ParameterSource.ConfigFile))
 
             
@@ -141,37 +141,36 @@ class RegisterBranchOperation(OperationBase):
                 parameter_pool.put(Parameter(ParameterName.Branches,
                                              dict(),
                                              ParameterSource.Terminal))
-            branches = parameter_pool.get_value(ParameterName.Branches)
+            branches = parameter_pool.get_value(ParameterName.Branches, False)
             branches[current_branch] = dict()
             source = ParameterSource.ConfigFile
             for key in EbConfigFile.BranchSectionKeys | EbConfigFile.BranchSectionHiddenKeys:
                 if branch_pool.has(key):
-                    branches[current_branch][key] = branch_pool.get_value(key)
+                    branches[current_branch][key] = branch_pool.get_value(key, False)
                     if ParameterSource.is_ahead(branch_pool.get_source(key), source):
                         source = branch_pool.get_source(key)
                 else:
                     # Copy parameter if not exists in branch
                     if parameter_pool.has(key): 
-                        branches[current_branch][key] = parameter_pool.get_value(key)
+                        branches[current_branch][key] = parameter_pool.get_value(key, False)
             parameter_pool.update(ParameterName.Branches, source=source)
             
             # Copy over optionsetting file
             if copy:
-                default_option_file = parameter_pool.get_value(ParameterName.OptionSettingFile)
+                default_option_file = parameter_pool.get_value(ParameterName.OptionSettingFile, False)
                 branch_option_file = branches[current_branch][ParameterName.OptionSettingFile]
-                log.debug(u'Copying config file from {0} to {1}.'.format(default_option_file,
+                log.debug(u'Copying optionsettings file from {0} to {1}.'.format(default_option_file,
                                                                          branch_option_file))
                 shell_utils.copy_file(default_option_file, branch_option_file, True)
                 config_file.set_access_permission(branch_option_file, True)
 
             # Fill [branch] section
-            if not parameter_pool.has(ParameterName.BranchMapping)\
-                or parameter_pool.get_value(ParameterName.BranchMapping) is None:
+            if parameter_pool.get_value(ParameterName.BranchMapping) is None:
                 parameter_pool.put(Parameter(ParameterName.BranchMapping,
                                              dict(),
                                              ParameterSource.Terminal))
-            branch_mapping = parameter_pool.get_value(ParameterName.BranchMapping)
-            branch_mapping[current_branch] = branch_pool.get_value(ParameterName.EnvironmentName)
+            branch_mapping = parameter_pool.get_value(ParameterName.BranchMapping, False)
+            branch_mapping[current_branch] = branch_pool.get_value(ParameterName.EnvironmentName, False)
             
         else:
             # local repository does not have branch committed yet.

@@ -432,7 +432,6 @@ function Get-Endpoint
     }
     $endpoint
 }
-
 #
 # Gets the remote URL used for AWS.push
 #
@@ -442,7 +441,9 @@ function Get-Endpoint
 #
 function Get-AWSElasticBeanstalkRemote
 {
-    Param([string] $e, [string] $c)
+    Param([string] $e,
+          [string] $c,
+          [bool] $toPush = $FALSE )
     trap [System.Management.Automation.MethodInvocationException]
     {
         if ($_.Exception -and $_.Exception.InnerException)
@@ -472,8 +473,9 @@ function Get-AWSElasticBeanstalkRemote
     $awsRegion = Lookup-Setting $config "global" "Region" ("eb","git")
     $awsHost = Lookup-Setting $config "global" "DevToolsEndpoint" ("eb","git")
     $awsApplication = Lookup-Setting $config "global" "ApplicationName" ("eb","git")
+ 
     if ($e)
-    {
+    {  
       $awsEnvironment = $e
     }
     else
@@ -505,6 +507,9 @@ function Get-AWSElasticBeanstalkRemote
 
     $awsAuth = New-Object -TypeName Amazon.DevTools.AWSDevToolsAuth $awsUser,$awsRequest
     $awsRemote = $awsAuth.DeriveRemote()
+    if($toPush) {
+       Write-Host "Pushing to environment: $awsEnvironment"  
+    }  
     return $awsRemote.ToString()
 }
 
@@ -517,7 +522,7 @@ function Get-AWSElasticBeanstalkRemote
 function Invoke-AWSElasticBeanstalkPush
 {
     Param([string] $e, [string] $c)
-    $remote = Get-AWSElasticBeanstalkRemote $e $c
+    $remote = Get-AWSElasticBeanstalkRemote $e $c $TRUE
     $src = $c
     $dst = "refs/heads/master"
     $commit = $src + ":" + $dst
@@ -731,11 +736,9 @@ function Read-Config($verboseOutput = $FALSE, $credentialOutput = $FALSE)
     {
         $credentialFile = $ebsettings["global"]["AwsCredentialFile"]
     }
-    if ((-not($credentialFile -and (Test-Path $credentialFile ))) -and ((Test-Path env:HOMEDRIVE) -and (Test-Path env:HOMEPATH)))
+    if ((-not($credentialFile -and (Test-Path $credentialFile ))) -and (Test-Path env:USERPROFILE))
     {
-        $homeDrive = Get-Item env:HOMEDRIVE
-        $homePath = Get-Item env:HOMEPATH
-        $credentialFile = $homeDrive.Value + $homePath.Value
+        $credentialFile = (Get-Item env:USERPROFILE).value
         $credentialFile = Join-Path $credentialFile ".elasticbeanstalk"
         $credentialFile = Join-Path $credentialFile "aws_credential_file"
     }
@@ -965,11 +968,9 @@ function ShouldWrite-Credentials($config, $checkForCreds = $True)
     { 
         if (-not((Test-Path env:AWS_CREDENTIAL_FILE) -or (Lookup-Setting $config "global" "AwsCredentialFile" ("eb"))))
         {
-            if ((Test-Path env:HOMEDRIVE) -and (Test-Path env:HOMEPATH))
+            if (Test-Path env:USERPROFILE)
             {
-                $homeDrive = Get-Item env:HOMEDRIVE
-                $homePath = Get-Item env:HOMEPATH
-                $credentialFile = $homeDrive.Value + $homePath.Value
+                $credentialFile = (Get-Item env:USERPROFILE).value
                 $credentialFile = Join-Path $credentialFile ".elasticbeanstalk"
                 $credentialFile = Join-Path $credentialFile "aws_credential_file"
                 if (Test-Path $credentialFile) 

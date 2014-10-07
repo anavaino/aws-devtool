@@ -110,7 +110,8 @@ class AWSQueryClient(object):
 
 
     def _request_with_retry(self, verb, url, headers, data, max_tries = 5):
-    
+        aws_code = None
+        http_code = None    
         durations = _exponential_backoff(max_tries)
         
         for index, length in enumerate(durations):
@@ -130,8 +131,8 @@ class AWSQueryClient(object):
                 if response.status_code != 200:
                     http_code = response.status_code
                     try:
-                        aws_code = response.json['Error']['Code']
-                        message = response.json['Error']['Message']
+                        aws_code = response.json()['Error']['Code']
+                        message = response.json()['Error']['Message']
                     except TypeError as ex:
                         raise AttributeError('HTTP {0}: {1}'.format(http_code, response.text))
 
@@ -149,7 +150,7 @@ class AWSQueryClient(object):
                     last_message = message
                     
                 else:
-                    if response.json is None:
+                    if response.json() is None:
                         raise ValueError('Cannot parse response form {0}.'.format(response.url))
                     return response
             

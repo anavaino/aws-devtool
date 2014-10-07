@@ -68,7 +68,7 @@ class NoSectionConfigParser(_RawConfigParser):
     _default_section = u'defaultsection'
     
     def read(self, pathfilename):
-        with codecs.open(pathfilename, 'r', encoding='utf-8') as input_file:
+        with codecs.open(pathfilename, 'r', encoding=ServiceDefault.CHAR_CODEC) as input_file:
             config_pairs = input_file.read()
         with _closing(_StringIO(u"[{0}]{1}{2}".format(self._default_section, 
                                                       os.linesep, 
@@ -77,7 +77,7 @@ class NoSectionConfigParser(_RawConfigParser):
             _RawConfigParser.readfp(self, default_section)
 
     def write(self, pathfilename):
-        with codecs.open(pathfilename, 'w', encoding='utf-8') as output_file:
+        with codecs.open(pathfilename, 'w', encoding=ServiceDefault.CHAR_CODEC) as output_file:
             for option in self.options(self._default_section):
                 output_file.write(u'{0}={1}{2}'.format(option, self.get(option), os.linesep))
 

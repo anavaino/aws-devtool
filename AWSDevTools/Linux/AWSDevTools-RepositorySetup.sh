@@ -15,8 +15,9 @@
 # specific language governing permissions and limitations under the
 # License.
 
-SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-[[ $GIT_DIR ]] && GIT_DIRECTORY=$GIT_DIR || GIT_DIRECTORY=.git
+SCRIPTDIR="$( cd "$( dirname "$0" )" && pwd )"
+GIT_DIRECTORY=$GIT_DIR
+if [ -z "$GIT_DIRECTORY" ]; then GIT_DIRECTORY=.git; fi
 
 rm -rf $GIT_DIRECTORY/AWSDevTools
 cp -r "$SCRIPTDIR"/scripts $GIT_DIRECTORY/AWSDevTools
@@ -34,3 +35,5 @@ git config alias.aws.elasticbeanstalk.push "!$GIT_DIRECTORY/AWSDevTools/aws.elas
 git config alias.aws.push '!git aws.elasticbeanstalk.push'
 git config alias.aws.elasticbeanstalk.config "!$GIT_DIRECTORY/AWSDevTools/aws.elasticbeanstalk.config"
 git config alias.aws.config '!git aws.elasticbeanstalk.config'
+git config alias.aws.elasticbeanstalk.createapplicationversion "!$GIT_DIRECTORY/AWSDevTools/aws.elasticbeanstalk.createapplicationversion"
+git config alias.aws.createapplicationversion '!git aws.elasticbeanstalk.createapplicationversion'

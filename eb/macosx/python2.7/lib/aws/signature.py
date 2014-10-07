@@ -176,7 +176,7 @@ class AWSSignature:
             return '/'
         path = urlparse.urlsplit(urlparse.urljoin('http://foo.com', \
                                                   split.path.lstrip('/'))).path.rstrip('/')
-        return urllib.quote(path, '/~') if path else '/'
+        return urllib.quote(misc.to_bytes(path), '/~') if path else '/'
 
 
     def _canonicalize_headers(self, headers):
@@ -202,11 +202,13 @@ class AWSSignature:
         for k, vs in sorted(params.iteritems(), key=operator.itemgetter(0)):
             if isinstance(vs, list):
                 for v in sorted(vs):
-                    ret_str += '&'.join(urllib.quote(k, safe='~') + '=' + urllib.quote(v, safe='~'))
+                    ret_str += '&'.join(urllib.quote(misc.to_bytes(k), safe='~') \
+                                        + '=' + urllib.quote(misc.to_bytes(v), safe='~'))
             else:
                 if ret_str:
                     ret_str += '&'
-                ret_str += urllib.quote(k, safe='~') + '=' + urllib.quote(vs, safe='~')
+                ret_str += urllib.quote(misc.to_bytes(k), safe='~') \
+                            + '=' + urllib.quote(misc.to_bytes(vs), safe='~')
 
         return ret_str        
     

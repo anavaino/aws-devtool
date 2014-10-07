@@ -17,7 +17,7 @@
 
 SCRIPTDIR="$( cd "$( dirname "$0" )" && pwd )"
 GIT_DIRECTORY=$GIT_DIR
-if [ -z "$GIT_DIRECTORY" ]; then GIT_DIRECTORY=.git; fi
+if [ -z "$GIT_DIRECTORY" ]; then GIT_DIRECTORY=$(git rev-parse --show-toplevel)/.git; fi
 
 rm -rf $GIT_DIRECTORY/AWSDevTools
 cp -r "$SCRIPTDIR"/scripts $GIT_DIRECTORY/AWSDevTools

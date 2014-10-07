@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 
 #-*-python-*-
 
@@ -17,6 +17,7 @@
 # specific language governing permissions and limitations under the
 # License.
 
+import os
 import argparse 
 from aws.dev_tools import * 
 
@@ -33,9 +34,20 @@ if __name__ == "__main__":
     commit instead of HEAD to create the version to be deployed to your environment. See the help for
     "git rev-parse" for a description of all the supported formats for identifying commits"""
 
+    subdir_message = """SUBDIR identifies a subdirectory in the repository. If this option is
+    specified, then only the files in this subdirectory will be archived rather than the entire
+    repository. The archive will have this subdirectory as its root (i.e., its name will not be
+    included in the path). This is particularly useful when your respository contains code for
+    more than just this application, such as a submodule or subproject contained in a lower level
+    directory. Another useful tool in this scenario is to take advantage of a .gitattributes
+    file and the export-ignore attribute. This push command uses 'git archive' and therefore
+    honors files in the .gitattributes file. NOTE: Only the currently commited version is looked
+    at - a working file will have no affect on the archive creation."""
+
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--environment", help=env_message)
     parser.add_argument("-c", "--commit", help=cmt_message)
+    parser.add_argument("-s", "--subdir", help=subdir_message)
     args = parser.parse_args()
     opts = {}
     dev_tools = DevTools()
@@ -46,7 +58,6 @@ if __name__ == "__main__":
     if args.commit:
 	if not dev_tools.commit_exists(args.commit):
 	    exit(1)
-
 	cmt_type = dev_tools.git_object_type(args.commit)
 	if "commit" != cmt_type:
 	    sys.stderr.write("{0} is a {1}. The value of the --commit option must refer to commit".format(args.commit, cmt_type))
@@ -54,5 +65,8 @@ if __name__ == "__main__":
 
 	opts["commit"] = dev_tools.commit_id(args.commit)
 
-    dev_tools.push_changes(opts.get("env"), opts.get("commit"))
+    if args.subdir:
+        opts["subdir"] = args.subdir
+
+    dev_tools.push_changes(opts.get("env"), opts.get("commit"), opts.get("subdir"))
     print "Environment update initiated successfully."

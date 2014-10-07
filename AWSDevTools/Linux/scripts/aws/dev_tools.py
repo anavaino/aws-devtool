@@ -69,11 +69,17 @@ class DevTools:
 	except (CalledProcessError, OSError) as e:
 	    return None
 
-    def create_archive(self, commit, filename):
-	try:
-	    call("git archive {0} --format=zip > {1}".format(commit, filename), shell=True)
-	except (CalledProcessError, OSError) as e:
-	    sys.exit("Error: Cannot archive your repository due to an unknown error")
+    def create_archive(self, commit, subdir, filename):
+		if not subdir:
+			subdir = os.getcwd()
+		try:
+			oldwd = os.getcwd()
+			os.chdir(subdir)
+			sys.stderr.write("Changed from {0} to {1} to zip into {2}\n".format(oldwd,subdir,filename))
+			call("git archive {0} . --format=zip > {1}".format(commit, filename), shell=True)
+			os.chdir(oldwd)
+		except (CalledProcessError, OSError) as e:
+			sys.exit("Error: Cannot archive your repository due to an unknown error")
 
     def commit_id(self, commit):
 	if not commit:
@@ -165,11 +171,13 @@ class DevTools:
 	except Exception as e:
 	    sys.exit("Error: Failed to create the AWS Elastic Beanstalk application version")
 
-    def create_application_version(self, env, commit, version_label = None):
+    def create_application_version(self, env, commit, subdir, version_label = None):
 	if not env:
 	    env = self.environment() or self.beanstalk_config.environment_name()
 	if not commit:
 	    commit = "HEAD"
+	if not subdir:
+		subdir = os.getcwd()
 
 	if not version_label:
 	    version_label = self.version_label(commit)
@@ -178,20 +186,22 @@ class DevTools:
 	archived_file_path = tempfile.mkdtemp()
 	archived_file_name = "{0}.zip".format(version_label)
 	archived_file = os.path.join(archived_file_path, archived_file_name)
-	self.create_archive(commit, archived_file)
+	self.create_archive(commit, subdir, archived_file)
 
 	bucket_name = self.bucket_name()
 	self.upload_file(bucket_name, archived_file)
 	self.create_eb_application_version(commit_message, bucket_name, archived_file_name, version_label)
 	shutil.rmtree(archived_file_path)
 
-    def push_changes(self, env, commit):
+    def push_changes(self, env, commit, subdir):
 	if not env:
 	    env = self.environment() or self.beanstalk_config.environment_name()
 	if not commit:
 	    commit = "HEAD"
+	if not subdir:
+		subdir = os.getcwd()
 
 	print "Updating the AWS Elastic Beanstalk environment %s..." % env
 	version_label = self.version_label(commit)
-	self.create_application_version(env, commit, version_label)
+	self.create_application_version(env, commit, subdir, version_label)
 	self.update_environment(env, version_label)

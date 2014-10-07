@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 # -*- coding: utf-8 -*-
 #==============================================================================
 # Copyright 2012 Amazon.com, Inc. or its affiliates. All Rights Reserved.
@@ -17,6 +17,7 @@
 
 from lib.utility.basetype import ValuedEnum
 from lib.utility.basetype import OrderedEnum
+import subprocess
 
 EbCliVersion = 'v2.6.3'
 
@@ -590,6 +591,13 @@ class GitIgnoreFile(object):
 class DevToolsConfigFile(object):
     Name = u'config'
     Path = u'.git'
+    try:
+        proc = subprocess.Popen(["git","rev-parse","--show-toplevel"], stdout=subprocess.PIPE)
+        (out,err) = proc.communicate()
+        if not err:
+            Path = out.rstrip() + u'/.git'
+    except:
+        pass
     InitHelpUrl = u'http://docs.amazonwebservices.com/elasticbeanstalk'\
         '/latest/dg/command-reference-get-started.html'
     
